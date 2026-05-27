@@ -326,7 +326,8 @@ function MemberPayment({ member, showToast }) {
     const el = receiptRef.current;
     if (!el) return;
     const w = window.open("", "_blank");
-    w.document.write("<html><head><title>PHConnectz Receipt</title></head><body>" + el.outerHTML + "<script>window.print();window.close();" + "<" + "/script></body></html>");
+    const scriptTag = "<script>window.print();window.close();</s" + "cript>";
+    w.document.write("<html><head><title>PHConnectz Receipt</title></head><body>" + el.outerHTML + scriptTag + "</body></html>");
     w.document.close();
   };
 
