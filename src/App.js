@@ -2,20 +2,32 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const SUPABASE_URL = "https://zxjrdvoqthhwebmtxdey.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LrhzFESy0ZXCav7UVEEJoQ_gCeN7ISc";
+const SUPER_ADMIN_PASSWORD = "Kenneth_SuperAdmin";
 
-const sb = async (path, opts = {}) => {
+// ── API HELPERS ───────────────────────────────────────────────────────────────
+const api = async (path, opts = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=representation", ...opts.headers },
     ...opts
   });
-  if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Request failed"); }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || e.error_description || "Request failed"); }
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 };
 
-const MEMBER_PASSWORD = "PHConnectz";
-const ADMIN_PASSWORD = "PHConnectz2024";
-const SUPER_ADMIN_PASSWORD = "Kenneth_SuperAdmin";
+const authApi = async (path, body) => {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.msg || data.message || "Auth failed");
+  return data;
+};
+
+const phoneToEmail = (phone) => `${phone.replace(/\s+/g, "")}@phconnectz.app`;
+const rNo = () => "PHC-" + Date.now().toString().slice(-7);
 
 const C = {
   purple: "#3D0066", mid: "#6A0DAD", light: "#9B59B6",
@@ -23,9 +35,6 @@ const C = {
   grey: "#F7F5FA", green: "#1DB954", red: "#E53935", orange: "#FB8C00",
   gMain: "linear-gradient(135deg, #3D0066 0%, #6A0DAD 100%)",
 };
-
-const uid = () => Math.random().toString(36).substr(2, 9);
-const rNo = () => "PHC-" + Date.now().toString().slice(-7);
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -37,18 +46,17 @@ export default function App() {
   return (
     <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", minHeight: "100vh", background: C.grey }}>
       <style>{`
-        @keyframes fadeUp { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-        @keyframes pulse { 0%,100%{transform:scale(1);}50%{transform:scale(1.06);} }
-        @keyframes spin { from{transform:rotate(0deg);}to{transform:rotate(360deg);} }
-        @keyframes slideUp { from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;} }
-        .fu{animation:fadeUp 0.4s ease both;}
-        .fi{animation:fadeIn 0.3s ease both;}
-        .ch:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(61,0,102,0.13)!important;}
-        .ch{transition:transform 0.2s,box-shadow 0.2s;}
-        .bp:active{transform:scale(0.97);}
-        input:focus,select:focus,textarea:focus{outline:none!important;border-color:#6A0DAD!important;box-shadow:0 0 0 3px rgba(106,13,173,0.1)!important;}
-        ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-thumb{background:#ddd;border-radius:3px;}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+        @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        .fu{animation:fadeUp 0.4s ease both}
+        .fi{animation:fadeIn 0.3s ease both}
+        .ch:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(61,0,102,0.13)!important}
+        .ch{transition:transform 0.2s,box-shadow 0.2s}
+        .bp:active{transform:scale(0.97)}
+        input:focus,select:focus,textarea:focus{outline:none!important;border-color:#6A0DAD!important;box-shadow:0 0 0 3px rgba(106,13,173,0.1)!important}
+        ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#ddd;border-radius:3px}
       `}</style>
       {toast && <Toast toast={toast} />}
       {!session
@@ -65,36 +73,59 @@ export default function App() {
 function AuthScreen({ setSession, showToast }) {
   const [tab, setTab] = useState("login");
   const [lf, setLf] = useState({ phone: "", password: "" });
-  const [rf, setRf] = useState({ name: "", phone: "" });
+  const [rf, setRf] = useState({ name: "", phone: "", password: "", confirmPassword: "", displayName: "" });
   const [loading, setLoading] = useState(false);
 
   const login = async () => {
     if (!lf.phone || !lf.password) return showToast("Please fill all fields", "error");
     setLoading(true);
     try {
-      if (lf.password === SUPER_ADMIN_PASSWORD) { setSession({ role: "superadmin", name: "Super Admin" }); return; }
-      if (lf.password === ADMIN_PASSWORD) { setSession({ role: "admin", name: "Admin" }); return; }
-      if (lf.password === MEMBER_PASSWORD) {
-        const rows = await sb(`members?phone=eq.${encodeURIComponent(lf.phone)}&select=*`);
-        if (!rows.length) return showToast("Phone not registered. Please sign up.", "error");
-        const m = rows[0];
-        setSession({ role: "member", memberId: m.id, name: m.name });
+      // Super admin check
+      if (lf.password === SUPER_ADMIN_PASSWORD) {
+        setSession({ role: "superadmin", name: "Super Admin", memberId: null });
         return;
       }
-      showToast("Incorrect password", "error");
-    } catch (e) { showToast(e.message, "error"); }
-    finally { setLoading(false); }
+      // Try Supabase Auth login
+      const data = await authApi("token?grant_type=password", { email: phoneToEmail(lf.phone), password: lf.password });
+      const rows = await api(`members?auth_id=eq.${data.user.id}&select=*`);
+      if (!rows.length) {
+        // Try phone match as fallback
+        const byPhone = await api(`members?phone=eq.${encodeURIComponent(lf.phone)}&select=*`);
+        if (!byPhone.length) return showToast("Member not found", "error");
+        const m = byPhone[0];
+        // Link auth_id if missing
+        await api(`members?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ auth_id: data.user.id }) });
+        const role = m.role === "Admin" ? "admin" : "member";
+        setSession({ role, memberId: m.id, name: m.name, authToken: data.access_token });
+        return;
+      }
+      const m = rows[0];
+      const role = m.role === "Admin" ? "admin" : "member";
+      setSession({ role, memberId: m.id, name: m.name, authToken: data.access_token });
+    } catch (e) {
+      showToast(e.message.includes("Invalid") ? "Incorrect phone or password" : e.message, "error");
+    } finally { setLoading(false); }
   };
 
   const register = async () => {
-    if (!rf.name.trim() || !rf.phone.trim()) return showToast("Please fill all fields", "error");
+    if (!rf.name.trim() || !rf.phone.trim() || !rf.password || !rf.confirmPassword) return showToast("Please fill all fields", "error");
+    if (rf.password !== rf.confirmPassword) return showToast("Passwords do not match", "error");
+    if (rf.password.length < 6) return showToast("Password must be at least 6 characters", "error");
     setLoading(true);
     try {
-      await sb("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), role: "Member" }) });
+      // Check if phone already registered
+      const existing = await api(`members?phone=eq.${encodeURIComponent(rf.phone.trim())}&select=id`);
+      if (existing.length) return showToast("Phone number already registered", "error");
+      // Create Supabase Auth user
+      const data = await authApi("signup", { email: phoneToEmail(rf.phone.trim()), password: rf.password });
+      // Create member record
+      await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), email: phoneToEmail(rf.phone.trim()), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", auth_id: data.user?.id }) });
       showToast("Account created! You can now log in.");
-      setTab("login"); setLf(f => ({ ...f, phone: rf.phone }));
-    } catch (e) { showToast(e.message.includes("unique") ? "Phone already registered" : e.message, "error"); }
-    finally { setLoading(false); }
+      setTab("login");
+      setLf(f => ({ ...f, phone: rf.phone }));
+    } catch (e) {
+      showToast(e.message.includes("already") ? "Phone already registered" : e.message, "error");
+    } finally { setLoading(false); }
   };
 
   return (
@@ -117,16 +148,16 @@ function AuthScreen({ setSession, showToast }) {
         {tab === "login" ? (
           <div className="fi">
             <FIn label="📱 Phone Number" value={lf.phone} onChange={v => setLf(f => ({ ...f, phone: v }))} placeholder="08012345678" />
-            <FIn label="🔒 Password" type="password" value={lf.password} onChange={v => setLf(f => ({ ...f, password: v }))} placeholder="Enter your password" />
+            <FIn label="🔒 Password" type="password" value={lf.password} onChange={v => setLf(f => ({ ...f, password: v }))} placeholder="Your password" />
             <GBtn onClick={login} loading={loading} full>Log In</GBtn>
-            <div style={{ background: C.grey, borderRadius: 10, padding: "10px 14px", marginTop: 14, textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: 11, color: "#aaa", lineHeight: 1.7 }}>Member: <b style={{ color: "#666" }}>PHConnectz</b><br />Admin: <b style={{ color: "#666" }}>PHConnectz2024</b></p>
-            </div>
           </div>
         ) : (
           <div className="fi">
             <FIn label="👤 Full Name" value={rf.name} onChange={v => setRf(f => ({ ...f, name: v }))} placeholder="Your full name" />
+            <FIn label="💬 Display Name (shown in chat)" value={rf.displayName} onChange={v => setRf(f => ({ ...f, displayName: v }))} placeholder="e.g. Kenny, Okeke K." />
             <FIn label="📱 Phone Number" value={rf.phone} onChange={v => setRf(f => ({ ...f, phone: v }))} placeholder="08012345678" />
+            <FIn label="🔒 Password" type="password" value={rf.password} onChange={v => setRf(f => ({ ...f, password: v }))} placeholder="Min. 6 characters" />
+            <FIn label="🔒 Confirm Password" type="password" value={rf.confirmPassword} onChange={v => setRf(f => ({ ...f, confirmPassword: v }))} placeholder="Repeat password" />
             <GBtn onClick={register} loading={loading} full>Create Account</GBtn>
           </div>
         )}
@@ -141,7 +172,7 @@ function MemberApp({ session, logout, showToast }) {
   const [member, setMember] = useState(null);
 
   useEffect(() => {
-    sb(`members?id=eq.${session.memberId}&select=*`).then(r => r[0] && setMember(r[0])).catch(() => { });
+    api(`members?id=eq.${session.memberId}&select=*`).then(r => r[0] && setMember(r[0])).catch(() => { });
   }, [session.memberId]);
 
   if (!member) return <Loader />;
@@ -152,55 +183,46 @@ function MemberApp({ session, logout, showToast }) {
     <div style={{ minHeight: "100vh", background: C.grey, paddingBottom: 76 }}>
       <header style={{ background: C.gMain, color: "#fff", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 4px 20px rgba(61,0,102,0.3)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Avatar member={member} size={36} />
-          <div><div style={{ fontWeight: 800, fontSize: 15 }}>PH Connectz</div><div style={{ fontSize: 10, opacity: 0.7 }}>Hi, {member.name.split(" ")[0]}!</div></div>
+          <Avi member={member} size={36} />
+          <div><div style={{ fontWeight: 800, fontSize: 15 }}>PH Connectz</div><div style={{ fontSize: 10, opacity: 0.7 }}>Hi, {member.display_name || member.name.split(" ")[0]}!</div></div>
         </div>
         <button onClick={logout} className="bp" style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", padding: "7px 14px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Sign Out</button>
       </header>
       <div style={{ padding: "16px 16px 0", maxWidth: 620, margin: "0 auto" }}>
-        {page === "home" && <MemberHome member={member} setPage={setPage} showToast={showToast} />}
+        {page === "home" && <MemberHome member={member} setPage={setPage} />}
         {page === "events" && <MemberEvents member={member} showToast={showToast} />}
         {page === "payment" && <MemberPayment member={member} showToast={showToast} />}
         {page === "chat" && <ChatPage member={member} showToast={showToast} />}
         {page === "profile" && <MemberProfile member={member} setMember={setMember} showToast={showToast} />}
       </div>
-      <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", display: "flex", borderTop: "1px solid #eee", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)", zIndex: 100 }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setPage(t.id)} style={{ flex: 1, padding: "9px 4px 7px", border: "none", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-            <span style={{ fontSize: 19 }}>{t.icon}</span>
-            <span style={{ fontSize: 9, fontWeight: page === t.id ? 800 : 400, color: page === t.id ? C.purple : "#bbb" }}>{t.label}</span>
-            {page === t.id && <div style={{ width: 4, height: 4, background: C.purple, borderRadius: "50%" }} />}
-          </button>
-        ))}
-      </nav>
+      <BottomNav tabs={tabs} page={page} setPage={setPage} dark={false} />
     </div>
   );
 }
 
-function MemberHome({ member, setPage, showToast }) {
+function MemberHome({ member, setPage }) {
   const [payment, setPayment] = useState(null);
   const [rsvps, setRsvps] = useState([]);
   const [confirmedCount, setConfirmedCount] = useState(0);
 
   useEffect(() => {
-    sb(`payments?member_id=eq.${member.id}&select=*`).then(r => setPayment(r[0] || null));
-    sb(`rsvps?member_id=eq.${member.id}&select=*`).then(setRsvps);
-    sb(`payments?status=eq.Confirmed&select=id`).then(r => setConfirmedCount(r.length));
+    api(`payments?member_id=eq.${member.id}&select=*`).then(r => setPayment(r[0] || null));
+    api(`rsvps?member_id=eq.${member.id}&select=*`).then(setRsvps);
+    api(`payments?status=eq.Confirmed&select=id`).then(r => setConfirmedCount(r.length));
   }, [member.id]);
 
-  const myRank = payment?.status === "Confirmed" ? confirmedCount : null;
-  const qualifiesPerk = myRank && myRank <= 50;
+  const qualifiesPerk = payment?.status === "Confirmed" && confirmedCount <= 50;
 
   return (
     <div>
       <div className="fu ch" style={{ background: C.gMain, borderRadius: 20, padding: "24px 20px", color: "#fff", marginBottom: 16, position: "relative", overflow: "hidden", boxShadow: "0 8px 28px rgba(61,0,102,0.25)" }}>
         <div style={{ position: "absolute", top: -30, right: -30, width: 140, height: 140, background: "rgba(255,255,255,0.05)", borderRadius: "50%" }} />
         <div style={{ fontSize: 32, marginBottom: 8 }}>👋</div>
-        <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 800 }}>Welcome, {member.name.split(" ")[0]}!</h2>
+        <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 800 }}>Welcome, {member.display_name || member.name.split(" ")[0]}!</h2>
         <p style={{ margin: 0, opacity: 0.8, fontSize: 13 }}>You're part of something special ✨</p>
       </div>
       {qualifiesPerk && (
-        <div className="fu" style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: `2px solid ${C.gold}`, borderRadius: 16, padding: 16, marginBottom: 14, textAlign: "center", boxShadow: "0 4px 16px rgba(240,192,64,0.2)" }}>
+        <div className="fu" style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: `2px solid ${C.gold}`, borderRadius: 16, padding: 16, marginBottom: 14, textAlign: "center" }}>
           <div style={{ fontSize: 36, animation: "pulse 2s infinite" }}>🎁</div>
           <p style={{ color: C.purple, fontWeight: 800, margin: "6px 0 2px" }}>Perk Unlocked!</p>
           <p style={{ fontSize: 13, color: "#666", margin: 0 }}>You qualify for FREE 3 yards of Anniversary Fabric!</p>
@@ -230,9 +252,9 @@ function MemberEvents({ member, showToast }) {
 
   useEffect(() => {
     Promise.all([
-      sb("events?select=*&order=created_at.desc"),
-      sb(`rsvps?member_id=eq.${member.id}&select=*`),
-      sb("payments?status=eq.Confirmed&select=event_id")
+      api("events?select=*&order=created_at.desc"),
+      api(`rsvps?member_id=eq.${member.id}&select=*`),
+      api("payments?status=eq.Confirmed&select=event_id")
     ]).then(([e, r, p]) => { setEvents(e); setRsvps(r); setPayments(p); setLoading(false); });
   }, [member.id]);
 
@@ -240,10 +262,10 @@ function MemberEvents({ member, showToast }) {
     const existing = rsvps.find(r => r.event_id === eventId);
     try {
       if (existing) {
-        await sb(`rsvps?id=eq.${existing.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+        await api(`rsvps?id=eq.${existing.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
         setRsvps(r => r.map(x => x.id === existing.id ? { ...x, status } : x));
       } else {
-        const rows = await sb("rsvps", { method: "POST", body: JSON.stringify({ member_id: member.id, event_id: eventId, status }) });
+        const rows = await api("rsvps", { method: "POST", body: JSON.stringify({ member_id: member.id, event_id: eventId, status }) });
         setRsvps(r => [...r, rows[0]]);
       }
       showToast(`RSVP updated: ${status}`);
@@ -298,10 +320,7 @@ function MemberPayment({ member, showToast }) {
   const receiptRef = useRef();
 
   useEffect(() => {
-    Promise.all([
-      sb(`payments?member_id=eq.${member.id}&select=*`),
-      sb("events?select=*&limit=1")
-    ]).then(([p, e]) => { setPayment(p[0] || null); setEvent(e[0] || null); setLoading(false); });
+    Promise.all([api(`payments?member_id=eq.${member.id}&select=*`), api("events?select=*&limit=1")]).then(([p, e]) => { setPayment(p[0] || null); setEvent(e[0] || null); setLoading(false); });
   }, [member.id]);
 
   const handleFile = (e) => {
@@ -319,7 +338,7 @@ function MemberPayment({ member, showToast }) {
     if (!ref.trim()) return showToast("Please enter your reference number", "error");
     setSubmitting(true);
     try {
-      const rows = await sb("payments", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, phone: member.phone, event_id: event?.id, event_name: event?.name, amount: event?.ticket_price || 20000, reference: ref.trim(), receipt_image: imgData, status: "Pending" }) });
+      const rows = await api("payments", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, phone: member.phone, event_id: event?.id, event_name: event?.name, amount: event?.ticket_price || 20000, reference: ref.trim(), receipt_image: imgData, status: "Pending" }) });
       setPayment(rows[0]);
       showToast("Receipt submitted! Awaiting admin confirmation.");
     } catch (e) { showToast(e.message, "error"); }
@@ -352,10 +371,7 @@ function MemberPayment({ member, showToast }) {
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#444", display: "block", marginBottom: 6 }}>Bank Receipt Image</label>
             <div onClick={() => fileRef.current.click()} style={{ border: `2px dashed ${imgData ? C.green : C.light}`, borderRadius: 14, padding: 20, textAlign: "center", cursor: "pointer", background: imgData ? "#f0faf4" : C.grey }}>
-              {imgData
-                ? <><img src={imgData} alt="receipt" style={{ maxHeight: 160, maxWidth: "100%", borderRadius: 8 }} /><p style={{ margin: "8px 0 0", fontSize: 12, color: C.green, fontWeight: 700 }}>✅ Image ready</p></>
-                : <><div style={{ fontSize: 36 }}>📤</div><p style={{ margin: "8px 0 0", color: "#888", fontSize: 13 }}>Tap to upload receipt</p><p style={{ margin: "4px 0 0", color: "#bbb", fontSize: 11 }}>JPG or PNG, max 4MB</p></>
-              }
+              {imgData ? <><img src={imgData} alt="receipt" style={{ maxHeight: 160, maxWidth: "100%", borderRadius: 8 }} /><p style={{ margin: "8px 0 0", fontSize: 12, color: C.green, fontWeight: 700 }}>✅ Image ready</p></> : <><div style={{ fontSize: 36 }}>📤</div><p style={{ margin: "8px 0 0", color: "#888", fontSize: 13 }}>Tap to upload receipt</p><p style={{ margin: "4px 0 0", color: "#bbb", fontSize: 11 }}>JPG or PNG, max 4MB</p></>}
             </div>
             <input ref={fileRef} type="file" accept="image/jpeg,image/png" style={{ display: "none" }} onChange={handleFile} />
           </div>
@@ -418,11 +434,14 @@ function MemberPayment({ member, showToast }) {
 function MemberProfile({ member, setMember, showToast }) {
   const [rsvps, setRsvps] = useState([]);
   const [payment, setPayment] = useState(null);
+  const [displayName, setDisplayName] = useState(member.display_name || "");
+  const [editingName, setEditingName] = useState(false);
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef();
 
   useEffect(() => {
-    sb(`rsvps?member_id=eq.${member.id}&select=*`).then(setRsvps);
-    sb(`payments?member_id=eq.${member.id}&select=*`).then(r => setPayment(r[0] || null));
+    api(`rsvps?member_id=eq.${member.id}&select=*`).then(setRsvps);
+    api(`payments?member_id=eq.${member.id}&select=*`).then(r => setPayment(r[0] || null));
   }, [member.id]);
 
   const handleAvatar = async (e) => {
@@ -433,7 +452,7 @@ function MemberProfile({ member, setMember, showToast }) {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        await sb(`members?id=eq.${member.id}`, { method: "PATCH", body: JSON.stringify({ avatar: ev.target.result }) });
+        await api(`members?id=eq.${member.id}`, { method: "PATCH", body: JSON.stringify({ avatar: ev.target.result }) });
         setMember(m => ({ ...m, avatar: ev.target.result }));
         showToast("Profile picture updated! 🎉");
       } catch (err) { showToast(err.message, "error"); }
@@ -441,21 +460,53 @@ function MemberProfile({ member, setMember, showToast }) {
     reader.readAsDataURL(file);
   };
 
+  const saveDisplayName = async () => {
+    if (!displayName.trim()) return showToast("Display name cannot be empty", "error");
+    setSaving(true);
+    try {
+      await api(`members?id=eq.${member.id}`, { method: "PATCH", body: JSON.stringify({ display_name: displayName.trim() }) });
+      setMember(m => ({ ...m, display_name: displayName.trim() }));
+      setEditingName(false);
+      showToast("Display name updated!");
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setSaving(false); }
+  };
+
   return (
     <div>
       <SecTitle>My Profile</SecTitle>
       <div className="fu" style={{ background: C.gMain, borderRadius: 20, padding: "28px 20px", color: "#fff", marginBottom: 16, textAlign: "center", boxShadow: "0 8px 28px rgba(61,0,102,0.25)" }}>
         <div style={{ position: "relative", width: 88, margin: "0 auto 14px" }}>
-          <div style={{ width: 88, height: 88, borderRadius: "50%", border: `3px solid ${C.gold}`, overflow: "hidden", background: C.gold, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, fontWeight: 900, color: C.purple, boxShadow: "0 4px 16px rgba(0,0,0,0.25)" }}>
+          <div style={{ width: 88, height: 88, borderRadius: "50%", border: `3px solid ${C.gold}`, overflow: "hidden", background: C.gold, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, fontWeight: 900, color: C.purple }}>
             {member.avatar ? <img src={member.avatar} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : member.name[0]}
           </div>
           <button onClick={() => fileRef.current.click()} style={{ position: "absolute", bottom: 0, right: 0, width: 28, height: 28, background: C.gold, border: "2px solid #fff", borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>📷</button>
           <input ref={fileRef} type="file" accept="image/jpeg,image/png" style={{ display: "none" }} onChange={handleAvatar} />
         </div>
-        <h3 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 800 }}>{member.name}</h3>
+        <h3 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800 }}>{member.name}</h3>
+        <p style={{ margin: "0 0 6px", fontSize: 13, opacity: 0.8 }}>💬 {member.display_name || "No display name set"}</p>
         <span style={{ background: "rgba(255,255,255,0.2)", padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{member.role}</span>
         <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.6 }}>Tap 📷 to change photo</p>
       </div>
+
+      {/* Display name editor */}
+      <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
+        <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.purple, fontSize: 14 }}>💬 Chat Display Name</p>
+        {editingName ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Your display name" style={{ flex: 1, padding: "9px 12px", border: "2px solid #eee", borderRadius: 10, fontSize: 13 }} />
+            <GBtn onClick={saveDisplayName} loading={saving} style={{ padding: "9px 14px", fontSize: 13 }}>Save</GBtn>
+            <button onClick={() => setEditingName(false)} style={{ padding: "9px 12px", border: "2px solid #eee", borderRadius: 10, background: "#fff", cursor: "pointer", fontSize: 13 }}>✕</button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: "#555" }}>{member.display_name || <span style={{ color: "#bbb" }}>Not set</span>}</span>
+            <button onClick={() => setEditingName(true)} style={{ background: "#f0e6ff", border: "none", color: C.purple, padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Edit</button>
+          </div>
+        )}
+        <p style={{ margin: "6px 0 0", fontSize: 11, color: "#aaa" }}>This name is shown in chat instead of your full name</p>
+      </div>
+
       <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
         {[["📱 Phone", member.phone], ["🏷 Role", member.role], ["🗓 RSVPs", rsvps.length], ["💳 Payment", payment?.status || "Not submitted"], ["📆 Member Since", new Date(member.created_at).toLocaleDateString()]].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f5f5f5" }}>
@@ -477,10 +528,12 @@ function ChatPage({ member, showToast }) {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef();
 
+  const isAdmin = member?.role === "Admin" || member?.role === "SuperAdmin" || member?.role === "superadmin";
+  const canPost = channel === "general" || isAdmin;
+
   const fetchMsgs = useCallback(async () => {
-    const rows = await sb(`messages?channel=eq.${channel}&select=*&order=created_at.asc&limit=100`);
-    setMessages(rows);
-    setLoading(false);
+    const rows = await api(`messages?channel=eq.${channel}&select=*&order=created_at.asc&limit=100`);
+    setMessages(rows); setLoading(false);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }, [channel]);
 
@@ -490,15 +543,12 @@ function ChatPage({ member, showToast }) {
     if (!text.trim()) return;
     setSending(true);
     try {
-      await sb("messages", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, avatar: member.avatar || null, content: text.trim(), channel }) });
-      setText("");
-      fetchMsgs();
+      const displayName = member.display_name || member.name;
+      await api("messages", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: text.trim(), channel }) });
+      setText(""); fetchMsgs();
     } catch (e) { showToast(e.message, "error"); }
     finally { setSending(false); }
   };
-
-  const isAdmin = channel === "announcements";
-  const canType = channel === "general" || member.role === "Admin" || member.role === "SuperAdmin";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 160px)" }}>
@@ -508,19 +558,20 @@ function ChatPage({ member, showToast }) {
           <button key={id} onClick={() => setChannel(id)} className="bp" style={{ flex: 1, padding: "9px", border: `2px solid ${channel === id ? C.purple : "#e0e0e0"}`, borderRadius: 12, background: channel === id ? C.gMain : "#fff", color: channel === id ? "#fff" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>{label}</button>
         ))}
       </div>
-      {channel === "announcements" && <div style={{ background: "#fff9e0", border: `1px solid ${C.gold}`, borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#666" }}>📢 Only admins can post here. Members can read.</div>}
+      {channel === "announcements" && !isAdmin && <div style={{ background: "#fff9e0", border: `1px solid ${C.gold}`, borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#666" }}>📢 Only admins can post here.</div>}
       <div style={{ flex: 1, background: "#fff", borderRadius: 16, padding: 12, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.07)", marginBottom: 10 }}>
         {loading && <Loader />}
         {!loading && messages.length === 0 && <Empty msg="No messages yet. Say hello! 👋" />}
         {messages.map((msg, i) => {
           const isMe = msg.member_id === member.id;
+          const name = msg.display_name || msg.member_name || "?";
           return (
             <div key={msg.id} className="fu" style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 8, marginBottom: 12, alignItems: "flex-end", animationDelay: `${Math.min(i * 0.02, 0.3)}s` }}>
               <div style={{ width: 30, height: 30, borderRadius: "50%", background: C.gMain, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13 }}>
-                {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (msg.member_name || "?")[0]}
+                {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]}
               </div>
               <div style={{ maxWidth: "72%" }}>
-                {!isMe && <p style={{ margin: "0 0 3px 4px", fontSize: 10, color: "#aaa", fontWeight: 600 }}>{msg.member_name}</p>}
+                {!isMe && <p style={{ margin: "0 0 3px 4px", fontSize: 10, color: "#aaa", fontWeight: 600 }}>{name}</p>}
                 <div style={{ background: isMe ? C.gMain : "#f5f5f5", color: isMe ? "#fff" : "#333", padding: "9px 13px", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", fontSize: 13, lineHeight: 1.5 }}>{msg.content}</div>
                 <p style={{ margin: "3px 4px 0", fontSize: 10, color: "#ccc", textAlign: isMe ? "right" : "left" }}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
@@ -529,7 +580,7 @@ function ChatPage({ member, showToast }) {
         })}
         <div ref={bottomRef} />
       </div>
-      {canType ? (
+      {canPost ? (
         <div style={{ display: "flex", gap: 8, background: "#fff", borderRadius: 14, padding: "8px 8px 8px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }}>
           <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent" }} />
           <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 40, height: 40, background: text.trim() ? C.gMain : "#eee", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
@@ -537,19 +588,27 @@ function ChatPage({ member, showToast }) {
           </button>
         </div>
       ) : (
-        <div style={{ background: "#f5f5f5", borderRadius: 12, padding: "12px", textAlign: "center", fontSize: 13, color: "#aaa" }}>Only admins can post in announcements</div>
+        <div style={{ background: "#f5f5f5", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>Only admins can post in announcements</div>
       )}
     </div>
   );
 }
 
-// ── ADMIN APP ──────────────────────────────────────────────────────────────────
+// ── ADMIN APP ─────────────────────────────────────────────────────────────────
 function AdminApp({ session, logout, showToast }) {
   const [page, setPage] = useState("home");
   const isSuperAdmin = session.role === "superadmin";
-  const tabs = [{ id: "home", icon: "📊", label: "Dashboard" }, { id: "members", icon: "👥", label: "Members" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payments", icon: "💳", label: "Payments" }, { id: "chat", icon: "💬", label: "Chat" }];
+  const [adminMember, setAdminMember] = useState(null);
 
-  const adminMember = { id: "admin", name: session.name || "Admin", role: isSuperAdmin ? "SuperAdmin" : "Admin", avatar: null };
+  useEffect(() => {
+    if (session.memberId) {
+      api(`members?id=eq.${session.memberId}&select=*`).then(r => r[0] && setAdminMember(r[0]));
+    }
+  }, [session.memberId]);
+
+  const chatMember = adminMember || { id: "admin", name: isSuperAdmin ? "Super Admin" : "Admin", role: isSuperAdmin ? "SuperAdmin" : "Admin", display_name: isSuperAdmin ? "Super Admin" : "Admin", avatar: null };
+
+  const tabs = [{ id: "home", icon: "📊", label: "Dashboard" }, { id: "members", icon: "👥", label: "Members" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payments", icon: "💳", label: "Payments" }, { id: "chat", icon: "💬", label: "Chat" }];
 
   return (
     <div style={{ minHeight: "100vh", background: C.grey, paddingBottom: 76 }}>
@@ -571,17 +630,9 @@ function AdminApp({ session, logout, showToast }) {
         {page === "members" && <AdminMembers showToast={showToast} isSuperAdmin={isSuperAdmin} />}
         {page === "events" && <AdminEvents showToast={showToast} />}
         {page === "payments" && <AdminPayments showToast={showToast} />}
-        {page === "chat" && <ChatPage member={adminMember} showToast={showToast} />}
+        {page === "chat" && <ChatPage member={chatMember} showToast={showToast} />}
       </div>
-      <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#1a0033", display: "flex", borderTop: "1px solid rgba(255,255,255,0.08)", zIndex: 100 }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setPage(t.id)} style={{ flex: 1, padding: "9px 4px 7px", border: "none", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-            <span style={{ fontSize: 18 }}>{t.icon}</span>
-            <span style={{ fontSize: 9, fontWeight: page === t.id ? 800 : 400, color: page === t.id ? C.gold : "rgba(255,255,255,0.4)" }}>{t.label}</span>
-            {page === t.id && <div style={{ width: 4, height: 4, background: C.gold, borderRadius: "50%" }} />}
-          </button>
-        ))}
-      </nav>
+      <BottomNav tabs={tabs} page={page} setPage={setPage} dark={true} />
     </div>
   );
 }
@@ -590,12 +641,8 @@ function AdminHome({ setPage, isSuperAdmin }) {
   const [stats, setStats] = useState({ members: 0, events: 0, confirmed: 0, pending: 0, total: 0 });
 
   useEffect(() => {
-    Promise.all([
-      sb("members?select=id"),
-      sb("events?select=id"),
-      sb("payments?status=eq.Confirmed&select=amount"),
-      sb("payments?status=eq.Pending&select=id")
-    ]).then(([m, e, c, p]) => setStats({ members: m.length, events: e.length, confirmed: c.length, pending: p.length, total: c.reduce((s, x) => s + (x.amount || 0), 0) }));
+    Promise.all([api("members?select=id"), api("events?select=id"), api("payments?status=eq.Confirmed&select=amount"), api("payments?status=eq.Pending&select=id")])
+      .then(([m, e, c, p]) => setStats({ members: m.length, events: e.length, confirmed: c.length, pending: p.length, total: c.reduce((s, x) => s + (x.amount || 0), 0) }));
   }, []);
 
   return (
@@ -614,7 +661,6 @@ function AdminHome({ setPage, isSuperAdmin }) {
           </div>
         ))}
       </div>
-      <h3 style={{ color: "#444", margin: "0 0 10px", fontSize: 14, fontWeight: 700 }}>Quick Actions</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {[["👥 Manage Members", "members", C.gMain], ["🗓 Create / Edit Events", "events", `linear-gradient(135deg,${C.light},${C.mid})`], ["💳 Review Payments", "payments", `linear-gradient(135deg,${C.green},#158a3e)`]].map(([label, pg, bg]) => (
           <button key={pg} onClick={() => setPage(pg)} className="bp ch" style={{ padding: "13px 18px", background: bg, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 700, fontSize: 14, textAlign: "left", boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}>{label}</button>
@@ -631,19 +677,22 @@ function AdminMembers({ showToast, isSuperAdmin }) {
   const [editM, setEditM] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = () => sb("members?select=*&order=created_at.desc").then(r => { setMembers(r); setLoading(false); });
+  const load = () => api("members?select=*&order=created_at.desc").then(r => { setMembers(r); setLoading(false); });
   useEffect(() => { load(); }, []);
 
   const filtered = members.filter(m => (m.name.toLowerCase().includes(search.toLowerCase()) || m.phone.includes(search)) && (roleF === "All" || m.role === roleF));
 
   const remove = async (id) => {
-    try { await sb(`members?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setMembers(m => m.filter(x => x.id !== id)); showToast("Member removed"); }
+    try { await api(`members?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setMembers(m => m.filter(x => x.id !== id)); showToast("Member removed"); }
     catch (e) { showToast(e.message, "error"); }
   };
 
   const saveEdit = async () => {
-    try { await sb(`members?id=eq.${editM.id}`, { method: "PATCH", body: JSON.stringify({ name: editM.name, phone: editM.phone, role: editM.role }) }); setMembers(m => m.map(x => x.id === editM.id ? { ...x, ...editM } : x)); setEditM(null); showToast("Member updated"); }
-    catch (e) { showToast(e.message, "error"); }
+    try {
+      await api(`members?id=eq.${editM.id}`, { method: "PATCH", body: JSON.stringify({ name: editM.name, phone: editM.phone, role: editM.role, display_name: editM.display_name }) });
+      setMembers(m => m.map(x => x.id === editM.id ? { ...x, ...editM } : x));
+      setEditM(null); showToast("Member updated");
+    } catch (e) { showToast(e.message, "error"); }
   };
 
   if (loading) return <Loader />;
@@ -662,9 +711,10 @@ function AdminMembers({ showToast, isSuperAdmin }) {
         <div key={m.id} className="fu ch" style={{ background: "#fff", borderRadius: 14, padding: 14, marginBottom: 10, boxShadow: "0 4px 14px rgba(0,0,0,0.06)", animationDelay: `${i * 0.04}s` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Avatar member={m} size={44} />
+              <Avi member={m} size={44} />
               <div>
-                <p style={{ margin: "0 0 2px", fontWeight: 800, color: C.purple, fontSize: 15 }}>{m.name}</p>
+                <p style={{ margin: "0 0 1px", fontWeight: 800, color: C.purple, fontSize: 15 }}>{m.name}</p>
+                {m.display_name && m.display_name !== m.name && <p style={{ margin: "0 0 2px", fontSize: 11, color: C.mid, fontWeight: 600 }}>💬 {m.display_name}</p>}
                 <p style={{ margin: "0 0 5px", fontSize: 12, color: "#999" }}>{m.phone}</p>
                 <Tag bg="#f0e6ff" color={C.purple}>{m.role}</Tag>
               </div>
@@ -680,12 +730,13 @@ function AdminMembers({ showToast, isSuperAdmin }) {
         <Modal onClose={() => setEditM(null)} title="Edit Member">
           <FIn label="Full Name" value={editM.name} onChange={v => setEditM(e => ({ ...e, name: v }))} />
           <FIn label="Phone" value={editM.phone} onChange={v => setEditM(e => ({ ...e, phone: v }))} />
+          <FIn label="💬 Display Name (chat)" value={editM.display_name || ""} onChange={v => setEditM(e => ({ ...e, display_name: v }))} placeholder="Name shown in chat" />
           <div style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#444", display: "block", marginBottom: 6 }}>Role</label>
             <select value={editM.role} onChange={e => setEditM(m => ({ ...m, role: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
               {(isSuperAdmin ? ["Member", "Exec", "Admin"] : ["Member", "Exec"]).map(r => <option key={r}>{r}</option>)}
             </select>
-            {!isSuperAdmin && <p style={{ fontSize: 11, color: "#aaa", margin: "4px 0 0" }}>Only Super Admins can assign Admin role.</p>}
+            {!isSuperAdmin && <p style={{ fontSize: 11, color: "#aaa", margin: "4px 0 0" }}>⚡ Only Super Admin can assign the Admin role.</p>}
           </div>
           <GBtn onClick={saveEdit} full>Save Changes</GBtn>
         </Modal>
@@ -705,15 +756,12 @@ function AdminEvents({ showToast }) {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef();
 
-  const load = () => Promise.all([sb("events?select=*&order=created_at.desc"), sb("payments?status=eq.Confirmed&select=event_id")]).then(([e, p]) => { setEvents(e); setPayments(p); setLoading(false); });
+  const load = () => Promise.all([api("events?select=*&order=created_at.desc"), api("payments?status=eq.Confirmed&select=event_id")]).then(([e, p]) => { setEvents(e); setPayments(p); setLoading(false); });
   useEffect(() => { load(); }, []);
 
   const handleFlyer = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const r = new FileReader();
-    r.onload = ev => setForm(f => ({ ...f, flyer: ev.target.result }));
-    r.readAsDataURL(file);
+    const file = e.target.files[0]; if (!file) return;
+    const r = new FileReader(); r.onload = ev => setForm(f => ({ ...f, flyer: ev.target.result })); r.readAsDataURL(file);
   };
 
   const save = async () => {
@@ -721,15 +769,15 @@ function AdminEvents({ showToast }) {
     setSaving(true);
     const payload = { name: form.name, date: form.date, description: form.description, capacity: +form.capacity, ticket_price: +form.ticket_price, perk_limit: +form.perk_limit, perk_desc: form.perk_desc, flyer: form.flyer };
     try {
-      if (editing) { await sb(`events?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload) }); showToast("Event updated ✅"); }
-      else { await sb("events", { method: "POST", body: JSON.stringify(payload) }); showToast("Event created ✅"); }
+      if (editing) { await api(`events?id=eq.${editing}`, { method: "PATCH", body: JSON.stringify(payload) }); showToast("Event updated ✅"); }
+      else { await api("events", { method: "POST", body: JSON.stringify(payload) }); showToast("Event created ✅"); }
       load(); setForm(blank); setEditing(null); setShowForm(false);
     } catch (e) { showToast(e.message, "error"); }
     finally { setSaving(false); }
   };
 
   const del = async (id) => {
-    try { await sb(`events?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setEvents(e => e.filter(x => x.id !== id)); showToast("Event deleted"); }
+    try { await api(`events?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setEvents(e => e.filter(x => x.id !== id)); showToast("Event deleted"); }
     catch (e) { showToast(e.message, "error"); }
   };
 
@@ -790,20 +838,20 @@ function AdminPayments({ showToast }) {
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState([]);
 
-  const load = () => Promise.all([sb("payments?select=*&order=submitted_at.desc"), sb("events?select=*")]).then(([p, e]) => { setPayments(p); setEvents(e); setLoading(false); });
+  const load = () => Promise.all([api("payments?select=*&order=submitted_at.desc"), api("events?select=*")]).then(([p, e]) => { setPayments(p); setEvents(e); setLoading(false); });
   useEffect(() => { load(); }, []);
 
   const confirm = async (id) => {
     const confirmedCount = payments.filter(p => p.status === "Confirmed").length;
     const evt = events[0];
     try {
-      await sb(`payments?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "Confirmed", confirmed_at: new Date().toISOString(), receipt_no: rNo(), perk_eligible: confirmedCount < (evt?.perk_limit || 50) }) });
+      await api(`payments?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "Confirmed", confirmed_at: new Date().toISOString(), receipt_no: rNo(), perk_eligible: confirmedCount < (evt?.perk_limit || 50) }) });
       load(); showToast("Payment confirmed ✅");
     } catch (e) { showToast(e.message, "error"); }
   };
 
   const reject = async (id) => {
-    try { await sb(`payments?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "Rejected" }) }); load(); showToast("Payment rejected", "error"); }
+    try { await api(`payments?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "Rejected" }) }); load(); showToast("Payment rejected", "error"); }
     catch (e) { showToast(e.message, "error"); }
   };
 
@@ -868,12 +916,26 @@ function AdminPayments({ showToast }) {
   );
 }
 
-// ── SHARED ────────────────────────────────────────────────────────────────────
-function Avatar({ member, size = 40 }) {
+// ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
+function Avi({ member, size = 40 }) {
   return (
-    <div style={{ width: size, height: size, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: size * 0.4, flexShrink: 0, border: `2px solid ${C.gold}` }}>
+    <div style={{ width: size, height: size, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: size * 0.38, flexShrink: 0, border: `2px solid ${C.gold}` }}>
       {member?.avatar ? <img src={member.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (member?.name || "?")[0]}
     </div>
+  );
+}
+
+function BottomNav({ tabs, page, setPage, dark }) {
+  return (
+    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: dark ? "#1a0033" : "#fff", display: "flex", borderTop: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid #eee", boxShadow: dark ? "none" : "0 -4px 20px rgba(0,0,0,0.07)", zIndex: 100 }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => setPage(t.id)} style={{ flex: 1, padding: "9px 4px 7px", border: "none", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+          <span style={{ fontSize: 19 }}>{t.icon}</span>
+          <span style={{ fontSize: 9, fontWeight: page === t.id ? 800 : 400, color: page === t.id ? (dark ? C.gold : C.purple) : (dark ? "rgba(255,255,255,0.4)" : "#bbb") }}>{t.label}</span>
+          {page === t.id && <div style={{ width: 4, height: 4, background: dark ? C.gold : C.purple, borderRadius: "50%" }} />}
+        </button>
+      ))}
+    </nav>
   );
 }
 
