@@ -15,18 +15,6 @@ const api = async (path, opts = {}) => {
   return text ? JSON.parse(text) : [];
 };
 
-const authApi = async (path, body) => {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
-    method: "POST",
-    headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || data.msg || data.message || "Auth failed");
-  return data;
-};
-
-const phoneToEmail = (phone) => `${phone.replace(/\s+/g, "")}@phconnectz.app`;
 const rNo = () => "PHC-" + Date.now().toString().slice(-7);
 
 const C = {
@@ -80,30 +68,18 @@ function AuthScreen({ setSession, showToast }) {
     if (!lf.phone || !lf.password) return showToast("Please fill all fields", "error");
     setLoading(true);
     try {
-      // Super admin check
       if (lf.password === SUPER_ADMIN_PASSWORD) {
         setSession({ role: "superadmin", name: "Super Admin", memberId: null });
         return;
       }
-      // Try Supabase Auth login
-      const data = await authApi("token?grant_type=password", { email: phoneToEmail(lf.phone), password: lf.password });
-      const rows = await api(`members?auth_id=eq.${data.user.id}&select=*`);
-      if (!rows.length) {
-        // Try phone match as fallback
-        const byPhone = await api(`members?phone=eq.${encodeURIComponent(lf.phone)}&select=*`);
-        if (!byPhone.length) return showToast("Member not found", "error");
-        const m = byPhone[0];
-        // Link auth_id if missing
-        await api(`members?id=eq.${m.id}`, { method: "PATCH", body: JSON.stringify({ auth_id: data.user.id }) });
-        const role = m.role === "Admin" ? "admin" : "member";
-        setSession({ role, memberId: m.id, name: m.name, authToken: data.access_token });
-        return;
-      }
+      const rows = await api(`members?phone=eq.${encodeURIComponent(lf.phone.trim())}&select=*`);
+      if (!rows.length) return showToast("Phone number not registered. Please sign up.", "error");
       const m = rows[0];
+      if (m.password !== lf.password) return showToast("Incorrect password", "error");
       const role = m.role === "Admin" ? "admin" : "member";
-      setSession({ role, memberId: m.id, name: m.name, authToken: data.access_token });
+      setSession({ role, memberId: m.id, name: m.name });
     } catch (e) {
-      showToast(e.message.includes("Invalid") ? "Incorrect phone or password" : e.message, "error");
+      showToast(e.message, "error");
     } finally { setLoading(false); }
   };
 
@@ -113,18 +89,14 @@ function AuthScreen({ setSession, showToast }) {
     if (rf.password.length < 6) return showToast("Password must be at least 6 characters", "error");
     setLoading(true);
     try {
-      // Check if phone already registered
       const existing = await api(`members?phone=eq.${encodeURIComponent(rf.phone.trim())}&select=id`);
       if (existing.length) return showToast("Phone number already registered", "error");
-      // Create Supabase Auth user
-      const data = await authApi("signup", { email: phoneToEmail(rf.phone.trim()), password: rf.password });
-      // Create member record
-      await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), email: phoneToEmail(rf.phone.trim()), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", auth_id: data.user?.id }) });
+      await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", password: rf.password }) });
       showToast("Account created! You can now log in.");
       setTab("login");
       setLf(f => ({ ...f, phone: rf.phone }));
     } catch (e) {
-      showToast(e.message.includes("already") ? "Phone already registered" : e.message, "error");
+      showToast(e.message.includes("unique") ? "Phone already registered" : e.message, "error");
     } finally { setLoading(false); }
   };
 
