@@ -5,9 +5,16 @@ const SUPABASE_KEY = "sb_publishable_LrhzFESy0ZXCav7UVEEJoQ_gCeN7ISc";
 const SUPER_ADMIN_PASSWORD = "Kenneth_SuperAdmin";
 
 const api = async (path, opts = {}) => {
+  const { headers: extraHeaders, ...restOpts } = opts;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=representation", ...opts.headers },
-    ...opts
+    ...restOpts,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...extraHeaders,
+    },
   });
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || "Request failed"); }
   const text = await res.text();
@@ -683,7 +690,7 @@ function AdminMembers({ showToast, isSuperAdmin }) {
 
   const remove = async (id) => {
     if (!window.confirm("Remove this member?")) return;
-    try { await api(`members?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setMembers(m => m.filter(x => x.id !== id)); showToast("Member removed"); }
+    try { await api("members?id=eq." + id, { method: "DELETE" }); setMembers(m => m.filter(x => x.id !== id)); showToast("Member removed"); }
     catch (e) { showToast(e.message, "error"); }
   };
 
@@ -779,7 +786,7 @@ function AdminEvents({ showToast }) {
 
   const del = async (id) => {
     if (!window.confirm("Are you sure you want to delete this event? This cannot be undone.")) return;
-    try { await api(`events?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setEvents(e => e.filter(x => x.id !== id)); showToast("Event deleted"); }
+    try { await api("events?id=eq." + id, { method: "DELETE" }); setEvents(e => e.filter(x => x.id !== id)); showToast("Event deleted"); }
     catch (e) { showToast("Delete failed: " + e.message, "error"); }
   };
 
