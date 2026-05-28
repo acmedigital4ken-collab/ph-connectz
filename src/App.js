@@ -152,7 +152,7 @@ function MemberApp({ session, logout, showToast }) {
   }, [session.memberId]);
 
   if (!member) return <Loader />;
-  const tabs = [{ id: "home", icon: "🏠", label: "Home" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payment", icon: "💳", label: "Payment" }, { id: "chat", icon: "💬", label: "Chat" }, { id: "profile", icon: "👤", label: "Profile" }];
+  const tabs = [{ id: "home", icon: "🏠", label: "Home" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payment", icon: "💳", label: "Payment" }, { id: "receipts", icon: "🧾", label: "Receipts" }, { id: "chat", icon: "💬", label: "Chat" }, { id: "profile", icon: "👤", label: "Profile" }];
 
   return (
     <div style={{ minHeight: "100vh", background: C.grey, paddingBottom: 76 }}>
@@ -167,6 +167,7 @@ function MemberApp({ session, logout, showToast }) {
         {page === "home" && <MemberHome member={member} setPage={setPage} />}
         {page === "events" && <MemberEvents member={member} showToast={showToast} />}
         {page === "payment" && <MemberPayment member={member} showToast={showToast} />}
+        {page === "receipts" && <MemberReceipts member={member} showToast={showToast} />}
         {page === "chat" && <ChatPage member={member} showToast={showToast} />}
         {page === "profile" && <MemberProfile member={member} setMember={setMember} showToast={showToast} />}
       </div>
@@ -323,8 +324,8 @@ function MemberPayment({ member, showToast }) {
   };
 
   const shareWA = () => {
-    const msg = `👑 *PH CONNECTZ PAYMENT RECEIPT*\n\nReceipt No: ${payment?.receipt_no}\nName: ${member.name}\nPhone: ${member.phone}\nEvent: ${event?.name}\nAmount: ₦${(event?.ticket_price || 20000).toLocaleString()}\nRef: ${payment?.reference}\nStatus: ✅ Confirmed\n\nThank you for being part of PH Connectz! 🎉`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`);
+    const msg = "👑 *PH CONNECTZ PAYMENT RECEIPT*\n\nReceipt No: " + (payment && payment.receipt_no) + "\nName: " + member.name + "\nPhone: " + member.phone + "\nEvent: " + (event && event.name) + "\nAmount: ₦" + ((event && event.ticket_price) || 20000).toLocaleString() + "\nRef: " + (payment && payment.reference) + "\nStatus: ✅ Confirmed\n\nThank you for being part of PH Connectz! 🎉";
+    window.open("https://wa.me/?text=" + encodeURIComponent(msg));
   };
 
   const print = () => {
@@ -367,41 +368,11 @@ function MemberPayment({ member, showToast }) {
             {payment.status === "Rejected" && <p style={{ fontSize: 13, color: C.red, marginTop: 8, fontWeight: 600 }}>❌ Payment was rejected. Please contact an admin.</p>}
           </div>
           {payment.status === "Confirmed" && (
-            <>
-              <div ref={receiptRef} className="fu" style={{ background: "#fff", border: `3px solid ${C.gold}`, borderRadius: 20, overflow: "hidden", marginBottom: 14, boxShadow: "0 8px 28px rgba(240,192,64,0.2)" }}>
-                <div style={{ background: C.gMain, padding: "22px 24px", textAlign: "center" }}>
-                  <div style={{ fontSize: 38 }}>👑</div>
-                  <h2 style={{ color: "#fff", margin: "4px 0 2px", fontSize: 20, fontWeight: 900, letterSpacing: 1 }}>PH CONNECTZ</h2>
-                  <div style={{ background: C.gold, color: C.purple, fontSize: 10, fontWeight: 800, letterSpacing: 3, padding: "3px 14px", borderRadius: 20, display: "inline-block", marginTop: 4 }}>OFFICIAL PAYMENT RECEIPT</div>
-                </div>
-                <div style={{ padding: "20px 24px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: `2px dashed ${C.gold}` }}>
-                    <span style={{ fontSize: 12, color: "#999" }}>Receipt No.</span>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>{payment.receipt_no}</span>
-                  </div>
-                  {[["Full Name", member.name], ["Phone", member.phone], ["Event", event?.name], ["Amount Paid", `₦${(payment.amount || 20000).toLocaleString()}`], ["Reference", payment.reference], ["Confirmed On", new Date(payment.confirmed_at).toLocaleString()]].map(([k, v]) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #f5f5f5" }}>
-                      <span style={{ fontSize: 12, color: "#999" }}>{k}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#333", textAlign: "right", maxWidth: "60%" }}>{v}</span>
-                    </div>
-                  ))}
-                  {payment.perk_eligible && (
-                    <div style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: `2px solid ${C.gold}`, borderRadius: 12, padding: 12, margin: "14px 0", textAlign: "center" }}>
-                      <div style={{ fontSize: 24, animation: "pulse 2s infinite" }}>🎁</div>
-                      <p style={{ margin: "4px 0 0", color: C.purple, fontWeight: 800, fontSize: 13 }}>You qualify for FREE 3 yards of Anniversary Fabric!</p>
-                    </div>
-                  )}
-                  <div style={{ textAlign: "center", marginTop: 16, paddingTop: 12, borderTop: `2px dashed ${C.gold}` }}>
-                    <p style={{ fontSize: 12, color: C.purple, fontWeight: 700, margin: 0 }}>Thank you for being part of PH Connectz!</p>
-                    <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>See you at the celebration! 🎉</p>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <GBtn onClick={print} style={{ flex: 1, background: "linear-gradient(135deg,#1DB954,#158a3e)" }}>🖨 Print</GBtn>
-                <GBtn onClick={shareWA} style={{ flex: 1, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>📲 WhatsApp</GBtn>
-              </div>
-            </>
+            <div className="fu" style={{ background: "#e6f9ef", border: "2px solid #1DB954", borderRadius: 14, padding: 16, textAlign: "center" }}>
+              <div style={{ fontSize: 36 }}>🧾</div>
+              <p style={{ color: "#1DB954", fontWeight: 800, margin: "6px 0 4px", fontSize: 15 }}>Payment Confirmed!</p>
+              <p style={{ fontSize: 13, color: "#555", margin: 0 }}>Your official receipt is in the Receipts tab.</p>
+            </div>
           )}
         </div>
       )}
@@ -409,7 +380,99 @@ function MemberPayment({ member, showToast }) {
   );
 }
 
-function MemberProfile({ member, setMember, showToast }) {
+function MemberReceipts({ member, showToast }) {
+  const [payment, setPayment] = useState(null);
+  const [event, setEvent] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const receiptRef = useRef();
+
+  useEffect(() => {
+    Promise.all([
+      api("payments?member_id=eq." + member.id + "&status=eq.Confirmed&select=*"),
+      api("events?select=*&limit=1")
+    ]).then(([p, e]) => { setPayment(p[0] || null); setEvent(e[0] || null); setLoading(false); });
+  }, [member.id]);
+
+  const shareWA = () => {
+    const msg = "👑 *PH CONNECTZ PAYMENT RECEIPT*\n\nReceipt No: " + payment?.receipt_no + "\nName: " + member.name + "\nPhone: " + member.phone + "\nEvent: " + event?.name + "\nAmount: ₦" + (event?.ticket_price || 20000).toLocaleString() + "\nRef: " + payment?.reference + "\nStatus: ✅ Confirmed\n" + (payment?.perk_eligible ? "\n🎁 You qualify for FREE 3 yards of Anniversary Fabric!" : "") + "\n\nThank you for being part of PH Connectz! 🎉";
+    window.open("https://wa.me/?text=" + encodeURIComponent(msg));
+  };
+
+  const print = () => {
+    const el = receiptRef.current;
+    if (!el) return;
+    const w = window.open("", "_blank");
+    const scriptTag = "<scr" + "ipt>window.print();window.close();</scr" + "ipt>";
+    w.document.write("<html><head><title>PHConnectz Receipt</title></head><body>" + el.outerHTML + scriptTag + "</body></html>");
+    w.document.close();
+  };
+
+  if (loading) return <Loader />;
+
+  return (
+    <div>
+      <SecTitle>Receipt History</SecTitle>
+      {!payment ? (
+        <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 24, textAlign: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🧾</div>
+          <p style={{ color: "#aaa", fontSize: 14, margin: 0 }}>No confirmed receipts yet.</p>
+          <p style={{ color: "#ccc", fontSize: 12, margin: "6px 0 0" }}>Your receipt will appear here once your payment is confirmed by an admin.</p>
+        </div>
+      ) : (
+        <div>
+          <div ref={receiptRef} className="fu" style={{ background: "#fff", border: "3px solid " + C.gold, borderRadius: 20, overflow: "hidden", marginBottom: 14, boxShadow: "0 8px 28px rgba(240,192,64,0.2)" }}>
+            <div style={{ background: C.gMain, padding: "22px 24px", textAlign: "center", position: "relative" }}>
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: "radial-gradient(circle at 20% 50%, rgba(255,255,255,0.05) 0%, transparent 50%)" }} />
+              <div style={{ fontSize: 38 }}>👑</div>
+              <h2 style={{ color: "#fff", margin: "4px 0 2px", fontSize: 20, fontWeight: 900, letterSpacing: 1 }}>PH CONNECTZ</h2>
+              <div style={{ background: C.gold, color: C.purple, fontSize: 10, fontWeight: 800, letterSpacing: 3, padding: "3px 14px", borderRadius: 20, display: "inline-block", marginTop: 4 }}>OFFICIAL PAYMENT RECEIPT</div>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "2px dashed " + C.gold }}>
+                <span style={{ fontSize: 12, color: "#999" }}>Receipt No.</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>{payment.receipt_no}</span>
+              </div>
+              {[
+                ["Full Name", member.name],
+                ["Phone", member.phone],
+                ["Event", event?.name],
+                ["Amount Paid", "₦" + (payment.amount || 20000).toLocaleString()],
+                ["Reference", payment.reference],
+                ["Confirmed On", new Date(payment.confirmed_at).toLocaleString()]
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #f5f5f5" }}>
+                  <span style={{ fontSize: 12, color: "#999" }}>{k}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333", textAlign: "right", maxWidth: "60%" }}>{v}</span>
+                </div>
+              ))}
+              {payment.perk_eligible && (
+                <div style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: "2px solid " + C.gold, borderRadius: 12, padding: 12, margin: "14px 0", textAlign: "center" }}>
+                  <div style={{ fontSize: 24, animation: "pulse 2s infinite" }}>🎁</div>
+                  <p style={{ margin: "4px 0 0", color: C.purple, fontWeight: 800, fontSize: 13 }}>You qualify for FREE 3 yards of Anniversary Fabric!</p>
+                </div>
+              )}
+              <div style={{ textAlign: "center", marginTop: 16, paddingTop: 12, borderTop: "2px dashed " + C.gold }}>
+                <div style={{ width: 56, height: 56, background: C.gMain, borderRadius: "50%", margin: "0 auto 10px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>👑</div>
+                <p style={{ fontSize: 12, color: C.purple, fontWeight: 700, margin: 0 }}>Thank you for being part of PH Connectz!</p>
+                <p style={{ fontSize: 11, color: "#888", margin: "4px 0 8px" }}>See you at the celebration! 🎉</p>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.grey, padding: "5px 14px", borderRadius: 20 }}>
+                  <span style={{ fontSize: 14 }}>🏅</span>
+                  <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>PH Connectz Verified</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <GBtn onClick={print} style={{ flex: 1, background: "linear-gradient(135deg,#1DB954,#158a3e)" }}>🖨 Print</GBtn>
+            <GBtn onClick={shareWA} style={{ flex: 1, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>📲 WhatsApp</GBtn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+({ member, setMember, showToast }) {
   const [rsvps, setRsvps] = useState([]);
   const [payment, setPayment] = useState(null);
   const [displayName, setDisplayName] = useState(member.display_name || "");
@@ -940,10 +1003,15 @@ function AdminPayments({ showToast }) {
             </div>
             <SBadge status={p.status} />
           </div>
-          {p.receipt_image && (
+          {p.receipt_image && p.status === "Pending" && (
             <div style={{ marginBottom: 10 }}>
               <img src={p.receipt_image} alt="receipt" onClick={() => setViewImg(p.receipt_image)} style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 10, border: "2px solid #eee", cursor: "pointer" }} />
               <p style={{ fontSize: 11, color: "#aaa", margin: "3px 0 0", textAlign: "center" }}>Tap to view full receipt</p>
+            </div>
+          )}
+          {p.status === "Confirmed" && (
+            <div style={{ background: "#e6f9ef", borderRadius: 10, padding: "8px 12px", marginBottom: 8 }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.green, fontWeight: 600 }}>✅ Receipt image removed after confirmation. Member has their generated receipt.</p>
             </div>
           )}
           {p.status === "Pending" && (
