@@ -538,11 +538,12 @@ function ChatPage({ member, showToast }) {
     if (!text.trim()) return;
     setSending(true);
     const displayName = member.display_name || member.name;
-    const optimistic = { id: "temp-" + Date.now(), member_id: senderId, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: text.trim(), channel, created_at: new Date().toISOString() };
+    const avatarUrl = member.avatar || null;
+    const optimistic = { id: "temp-" + Date.now(), member_id: senderId, member_name: member.name, display_name: displayName, avatar: avatarUrl, content: text.trim(), channel, created_at: new Date().toISOString() };
     setMessages(prev => [...prev, optimistic]);
     setText(""); setShowEmoji(false); scrollToBottom();
     try {
-      await api("messages", { method: "POST", body: JSON.stringify({ member_id: senderId, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: optimistic.content, channel }) });
+      await api("messages", { method: "POST", body: JSON.stringify({ member_id: senderId, member_name: member.name, display_name: displayName, avatar: avatarUrl, content: optimistic.content, channel }) });
       fetchMsgs(false);
     } catch (e) {
       setMessages(prev => prev.filter(m => m.id !== optimistic.id));
@@ -573,15 +574,19 @@ function ChatPage({ member, showToast }) {
           const isConsec = i > 0 && messages[i - 1]?.member_id === msg.member_id && messages[i - 1]?.member_id !== null;
           return (
             <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 6, marginBottom: isConsec ? 2 : 8, alignItems: "flex-end", paddingLeft: isMe ? 40 : 0, paddingRight: isMe ? 0 : 40 }}>
-              {!isMe && (
-                <div style={{ width: 28, height: 28, flexShrink: 0, visibility: isConsec ? "hidden" : "visible" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 11 }}>
-                    {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]?.toUpperCase()}
+              {/* Avatar — always reserve space, show on first message of a group */}
+              <div style={{ width: 32, height: 32, flexShrink: 0, alignSelf: "flex-end" }}>
+                {!isMe && !isConsec && (
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13, border: "2px solid #fff", boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>
+                    {msg.avatar
+                      ? <img src={msg.avatar} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : name[0]?.toUpperCase()
+                    }
                   </div>
-                </div>
-              )}
+                )}
+              </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", maxWidth: "75%" }}>
-                {showName && <p style={{ margin: "0 0 2px 8px", fontSize: 11, color: C.mid, fontWeight: 700 }}>{name}</p>}
+                {showName && <p style={{ margin: "0 0 3px 4px", fontSize: 11, color: C.mid, fontWeight: 700 }}>{name}</p>}
                 <div style={{
                   background: isMe ? "#DCF8C6" : "#FFFFFF",
                   color: "#111",
@@ -593,7 +598,6 @@ function ChatPage({ member, showToast }) {
                   lineHeight: 1.45,
                   wordBreak: "break-word",
                   boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
-                  position: "relative",
                   minWidth: 60,
                 }}>
                   {msg.content}
