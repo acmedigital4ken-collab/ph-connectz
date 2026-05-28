@@ -472,7 +472,7 @@ function MemberReceipts({ member, showToast }) {
   );
 }
 
-({ member, setMember, showToast }) {
+function MemberProfile({ member, setMember, showToast }) {
   const [rsvps, setRsvps] = useState([]);
   const [payment, setPayment] = useState(null);
   const [displayName, setDisplayName] = useState(member.display_name || "");
