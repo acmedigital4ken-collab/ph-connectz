@@ -78,10 +78,12 @@ function AuthScreen({ setSession, showToast }) {
     setLoading(true);
     try {
       if (lf.password === SUPER_ADMIN_PASSWORD) { setSession({ role: "superadmin", name: "Super Admin", memberId: null }); return; }
-      const rows = await api(`members?phone=eq.${encodeURIComponent(lf.phone.trim())}&select=*`);
+      const rows = await api("members?phone=eq." + encodeURIComponent(lf.phone.trim()) + "&select=*");
       if (!rows.length) return showToast("Phone not registered. Please sign up.", "error");
       const m = rows[0];
       if (m.password !== lf.password) return showToast("Incorrect password", "error");
+      if (m.status === "Pending") return showToast("Your account is awaiting admin approval. Please check back soon.", "error");
+      if (m.status === "Suspended") return showToast("Your account has been suspended. Please contact an admin.", "error");
       setSession({ role: m.role === "Admin" ? "admin" : "member", memberId: m.id, name: m.name });
     } catch (e) { showToast(e.message, "error"); }
     finally { setLoading(false); }
@@ -561,25 +563,45 @@ function ChatPage({ member, showToast }) {
       {channel === "announcements" && !isAdmin && (
         <div style={{ background: "#fff9e0", border: `1px solid ${C.gold}`, borderRadius: 10, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: "#888" }}>📢 Only admins can post here.</div>
       )}
-      <div ref={chatRef} style={{ flex: 1, background: "#fff", borderRadius: 16, padding: "12px 10px", overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.07)", marginBottom: 8, backgroundImage: "radial-gradient(circle at 1px 1px, rgba(106,13,173,0.03) 1px, transparent 0)", backgroundSize: "20px 20px" }}>
+      <div ref={chatRef} style={{ flex: 1, background: "#ECE5DD", borderRadius: 16, padding: "12px 10px", overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.07)", marginBottom: 8 }}>
         {loading && <Loader />}
         {!loading && messages.length === 0 && <Empty msg="No messages yet. Say hello! 👋" />}
         {messages.map((msg, i) => {
           const isMe = msg.member_id === senderId || (senderId === null && msg.member_name === member.name);
           const name = msg.display_name || msg.member_name || "?";
           const showName = !isMe && (i === 0 || messages[i - 1]?.member_id !== msg.member_id);
-          const isConsec = i > 0 && messages[i - 1]?.member_id === msg.member_id;
+          const isConsec = i > 0 && messages[i - 1]?.member_id === msg.member_id && messages[i - 1]?.member_id !== null;
           return (
-            <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 6, marginBottom: isConsec ? 3 : 10, alignItems: "flex-end" }}>
-              <div style={{ width: 28, height: 28, flexShrink: 0, visibility: (!isMe && !isConsec) ? "visible" : "hidden" }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 11 }}>
-                  {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]?.toUpperCase()}
+            <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 6, marginBottom: isConsec ? 2 : 8, alignItems: "flex-end", paddingLeft: isMe ? 40 : 0, paddingRight: isMe ? 0 : 40 }}>
+              {!isMe && (
+                <div style={{ width: 28, height: 28, flexShrink: 0, visibility: isConsec ? "hidden" : "visible" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 11 }}>
+                    {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]?.toUpperCase()}
+                  </div>
                 </div>
-              </div>
-              <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
-                {showName && <p style={{ margin: "0 0 2px 2px", fontSize: 10, color: C.mid, fontWeight: 700 }}>{name}</p>}
-                <div style={{ background: isMe ? C.gMain : "#f0f0f0", color: isMe ? "#fff" : "#222", padding: "8px 12px", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", fontSize: 13.5, lineHeight: 1.45, wordBreak: "break-word", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>{msg.content}</div>
-                <p style={{ margin: "2px 4px 0", fontSize: 9.5, color: "#bbb" }}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", maxWidth: "75%" }}>
+                {showName && <p style={{ margin: "0 0 2px 8px", fontSize: 11, color: C.mid, fontWeight: 700 }}>{name}</p>}
+                <div style={{
+                  background: isMe ? "#DCF8C6" : "#FFFFFF",
+                  color: "#111",
+                  padding: "7px 12px 6px",
+                  borderRadius: isMe
+                    ? isConsec ? "12px 12px 4px 12px" : "12px 4px 4px 12px"
+                    : isConsec ? "12px 12px 12px 4px" : "4px 12px 12px 12px",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  wordBreak: "break-word",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                  position: "relative",
+                  minWidth: 60,
+                }}>
+                  {msg.content}
+                  <span style={{ fontSize: 10, color: "#888", marginLeft: 8, float: "right", marginTop: 2, lineHeight: 1 }}>
+                    {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {isMe && " ✓✓"}
+                  </span>
+                </div>
               </div>
             </div>
           );
@@ -591,11 +613,13 @@ function ChatPage({ member, showToast }) {
         </div>
       )}
       {canPost ? (
-        <div style={{ display: "flex", gap: 6, background: "#fff", borderRadius: 24, padding: "6px 6px 6px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", alignItems: "center" }}>
-          <button onClick={() => setShowEmoji(s => !s)} style={{ fontSize: 22, background: "none", border: "none", cursor: "pointer", padding: "4px", flexShrink: 0, opacity: 0.7 }}>😊</button>
-          <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent", padding: "4px 0" }} />
-          <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 38, height: 38, background: text.trim() ? C.gMain : "#eee", border: "none", borderRadius: "50%", cursor: text.trim() ? "pointer" : "default", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s", flexShrink: 0 }}>
-            {sending ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block", fontSize: 12 }}>⟳</span> : "➤"}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ flex: 1, display: "flex", gap: 6, background: "#fff", borderRadius: 24, padding: "6px 6px 6px 14px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", alignItems: "center" }}>
+            <button onClick={() => setShowEmoji(s => !s)} style={{ fontSize: 22, background: "none", border: "none", cursor: "pointer", padding: "2px", flexShrink: 0, opacity: 0.6 }}>😊</button>
+            <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent", padding: "4px 0" }} />
+          </div>
+          <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 44, height: 44, background: text.trim() ? "#25D366" : "#aaa", border: "none", borderRadius: "50%", cursor: text.trim() ? "pointer" : "default", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+            {sending ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block", fontSize: 12, color: "#fff" }}>⟳</span> : <span style={{ color: "#fff" }}>➤</span>}
           </button>
         </div>
       ) : (
@@ -646,10 +670,10 @@ function AdminApp({ session, logout, showToast }) {
 }
 
 function AdminHome({ setPage, isSuperAdmin }) {
-  const [stats, setStats] = useState({ members: 0, events: 0, confirmed: 0, pending: 0, total: 0 });
+  const [stats, setStats] = useState({ members: 0, pending: 0, events: 0, confirmed: 0, payPending: 0, total: 0 });
   useEffect(() => {
-    Promise.all([api("members?select=id"), api("events?select=id"), api("payments?status=eq.Confirmed&select=amount"), api("payments?status=eq.Pending&select=id")])
-      .then(([m, e, c, p]) => setStats({ members: m.length, events: e.length, confirmed: c.length, pending: p.length, total: c.reduce((s, x) => s + (x.amount || 0), 0) }));
+    Promise.all([api("members?select=id"), api("members?status=eq.Pending&select=id"), api("events?select=id"), api("payments?status=eq.Confirmed&select=amount"), api("payments?status=eq.Pending&select=id")])
+      .then(([m, p, e, c, pay]) => setStats({ members: m.length, pending: p.length, events: e.length, confirmed: c.length, payPending: pay.length, total: c.reduce((s, x) => s + (x.amount || 0), 0) }));
   }, []);
   return (
     <div>
@@ -658,8 +682,17 @@ function AdminHome({ setPage, isSuperAdmin }) {
         <h2 style={{ margin: "0 0 2px", fontSize: 22, fontWeight: 900 }}>Welcome back!</h2>
         <p style={{ margin: 0, opacity: 0.55, fontSize: 12 }}>{new Date().toDateString()}</p>
       </div>
+      {stats.pending > 0 && (
+        <div className="fu" style={{ background: "#fff9e0", border: "2px solid " + C.orange, borderRadius: 14, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <p style={{ margin: 0, fontWeight: 800, color: C.orange, fontSize: 14 }}>⏳ {stats.pending} Pending Approval</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#888" }}>New members waiting to be approved</p>
+          </div>
+          <button onClick={() => setPage("members")} style={{ background: C.orange, border: "none", color: "#fff", padding: "8px 14px", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Review</button>
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-        {[["👥", "Total Members", stats.members, C.mid], ["🗓", "Events", stats.events, C.light], ["💰", "Collected", `₦${stats.total.toLocaleString()}`, C.green], ["⏳", "Pending", stats.pending, C.orange]].map(([icon, label, val, color], i) => (
+        {[["👥", "Total Members", stats.members, C.mid], ["🗓", "Events", stats.events, C.light], ["💰", "Collected", "₦" + stats.total.toLocaleString(), C.green], ["⏳", "Pending Payments", stats.payPending, C.orange]].map(([icon, label, val, color], i) => (
           <div key={label} className="fu ch" style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 4px 14px rgba(0,0,0,0.06)", borderTop: `4px solid ${color}`, animationDelay: `${i * 0.07}s` }}>
             <div style={{ fontSize: 24 }}>{icon}</div>
             <div style={{ fontSize: 22, fontWeight: 900, color, margin: "4px 0 2px" }}>{val}</div>
