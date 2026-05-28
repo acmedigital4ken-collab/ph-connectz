@@ -4,18 +4,18 @@ const SUPABASE_URL = "https://zxjrdvoqthhwebmtxdey.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LrhzFESy0ZXCav7UVEEJoQ_gCeN7ISc";
 const SUPER_ADMIN_PASSWORD = "Kenneth_SuperAdmin";
 
-// ── API HELPERS ───────────────────────────────────────────────────────────────
 const api = async (path, opts = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=representation", ...opts.headers },
     ...opts
   });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || e.error_description || "Request failed"); }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || "Request failed"); }
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 };
 
 const rNo = () => "PHC-" + Date.now().toString().slice(-7);
+const EMOJIS = ["😀", "😂", "😍", "🥰", "😎", "🤩", "😊", "🙌", "👏", "🔥", "❤️", "💯", "🎉", "👍", "😭", "😅", "🤣", "😤", "💪", "🙏", "👑", "✨", "🎊", "😆", "🤔", "👀", "💬", "📢", "🫡", "🥳"];
 
 const C = {
   purple: "#3D0066", mid: "#6A0DAD", light: "#9B59B6",
@@ -25,11 +25,13 @@ const C = {
 };
 
 export default function App() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(() => {
+    try { const s = localStorage.getItem("phc_session"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
   const [toast, setToast] = useState(null);
-
   const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
-  const logout = () => setSession(null);
+  const logout = () => { localStorage.removeItem("phc_session"); setSession(null); };
+  const setSessionPersist = (s) => { localStorage.setItem("phc_session", JSON.stringify(s)); setSession(s); };
 
   return (
     <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", minHeight: "100vh", background: C.grey }}>
@@ -48,7 +50,7 @@ export default function App() {
       `}</style>
       {toast && <Toast toast={toast} />}
       {!session
-        ? <AuthScreen setSession={setSession} showToast={showToast} />
+        ? <AuthScreen setSession={setSessionPersist} showToast={showToast} />
         : session.role === "member"
           ? <MemberApp session={session} logout={logout} showToast={showToast} />
           : <AdminApp session={session} logout={logout} showToast={showToast} />
@@ -68,19 +70,14 @@ function AuthScreen({ setSession, showToast }) {
     if (!lf.phone || !lf.password) return showToast("Please fill all fields", "error");
     setLoading(true);
     try {
-      if (lf.password === SUPER_ADMIN_PASSWORD) {
-        setSession({ role: "superadmin", name: "Super Admin", memberId: null });
-        return;
-      }
+      if (lf.password === SUPER_ADMIN_PASSWORD) { setSession({ role: "superadmin", name: "Super Admin", memberId: null }); return; }
       const rows = await api(`members?phone=eq.${encodeURIComponent(lf.phone.trim())}&select=*`);
-      if (!rows.length) return showToast("Phone number not registered. Please sign up.", "error");
+      if (!rows.length) return showToast("Phone not registered. Please sign up.", "error");
       const m = rows[0];
       if (m.password !== lf.password) return showToast("Incorrect password", "error");
-      const role = m.role === "Admin" ? "admin" : "member";
-      setSession({ role, memberId: m.id, name: m.name });
-    } catch (e) {
-      showToast(e.message, "error");
-    } finally { setLoading(false); }
+      setSession({ role: m.role === "Admin" ? "admin" : "member", memberId: m.id, name: m.name });
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setLoading(false); }
   };
 
   const register = async () => {
@@ -93,11 +90,9 @@ function AuthScreen({ setSession, showToast }) {
       if (existing.length) return showToast("Phone number already registered", "error");
       await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", password: rf.password }) });
       showToast("Account created! You can now log in.");
-      setTab("login");
-      setLf(f => ({ ...f, phone: rf.phone }));
-    } catch (e) {
-      showToast(e.message.includes("unique") ? "Phone already registered" : e.message, "error");
-    } finally { setLoading(false); }
+      setTab("login"); setLf(f => ({ ...f, phone: rf.phone }));
+    } catch (e) { showToast(e.message.includes("unique") ? "Phone already registered" : e.message, "error"); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -126,7 +121,7 @@ function AuthScreen({ setSession, showToast }) {
         ) : (
           <div className="fi">
             <FIn label="👤 Full Name" value={rf.name} onChange={v => setRf(f => ({ ...f, name: v }))} placeholder="Your full name" />
-            <FIn label="💬 Display Name (shown in chat)" value={rf.displayName} onChange={v => setRf(f => ({ ...f, displayName: v }))} placeholder="e.g. Kenny, Okeke K." />
+            <FIn label="💬 Display Name (shown in chat)" value={rf.displayName} onChange={v => setRf(f => ({ ...f, displayName: v }))} placeholder="e.g. Kenny" />
             <FIn label="📱 Phone Number" value={rf.phone} onChange={v => setRf(f => ({ ...f, phone: v }))} placeholder="08012345678" />
             <FIn label="🔒 Password" type="password" value={rf.password} onChange={v => setRf(f => ({ ...f, password: v }))} placeholder="Min. 6 characters" />
             <FIn label="🔒 Confirm Password" type="password" value={rf.confirmPassword} onChange={v => setRf(f => ({ ...f, confirmPassword: v }))} placeholder="Repeat password" />
@@ -148,7 +143,6 @@ function MemberApp({ session, logout, showToast }) {
   }, [session.memberId]);
 
   if (!member) return <Loader />;
-
   const tabs = [{ id: "home", icon: "🏠", label: "Home" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payment", icon: "💳", label: "Payment" }, { id: "chat", icon: "💬", label: "Chat" }, { id: "profile", icon: "👤", label: "Profile" }];
 
   return (
@@ -221,6 +215,7 @@ function MemberEvents({ member, showToast }) {
   const [rsvps, setRsvps] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [viewFlyer, setViewFlyer] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -256,7 +251,7 @@ function MemberEvents({ member, showToast }) {
         const pct = Math.min(100, Math.round((confirmed / evt.capacity) * 100));
         return (
           <div key={evt.id} className="fu ch" style={{ background: "#fff", borderRadius: 18, overflow: "hidden", marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.07)", animationDelay: `${i * 0.07}s` }}>
-            {evt.flyer && <img src={evt.flyer} alt="flyer" style={{ width: "100%", maxHeight: 200, objectFit: "cover" }} />}
+            {evt.flyer && <img src={evt.flyer} alt="flyer" onClick={() => setViewFlyer(evt.flyer)} style={{ width: "100%", maxHeight: 200, objectFit: "cover", cursor: "pointer" }} title="Tap to view full flyer" />}
             <div style={{ padding: 16 }}>
               <h3 style={{ color: C.purple, margin: "0 0 6px", fontSize: 16, fontWeight: 800 }}>{evt.name}</h3>
               <p style={{ fontSize: 12, color: "#999", margin: "0 0 6px" }}>📅 {evt.date}</p>
@@ -277,6 +272,7 @@ function MemberEvents({ member, showToast }) {
           </div>
         );
       })}
+      <FlyerModal flyer={viewFlyer} onClose={() => setViewFlyer(null)} />
     </div>
   );
 }
@@ -326,7 +322,7 @@ function MemberPayment({ member, showToast }) {
     const el = receiptRef.current;
     if (!el) return;
     const w = window.open("", "_blank");
-    const scriptTag = "<script>window.print();window.close();</s" + "cript>";
+    const scriptTag = "<scr" + "ipt>window.print();window.close();</scr" + "ipt>";
     w.document.write("<html><head><title>PHConnectz Receipt</title></head><body>" + el.outerHTML + scriptTag + "</body></html>");
     w.document.close();
   };
@@ -437,7 +433,7 @@ function MemberProfile({ member, setMember, showToast }) {
     if (!displayName.trim()) return showToast("Display name cannot be empty", "error");
     setSaving(true);
     try {
-      await api(`members?id=eq.${member.id}`, { method: "PATCH", body: JSON.stringify({ display_name: displayName.trim() }) });
+      await api("members?id=eq." + member.id, { method: "PATCH", body: JSON.stringify({ display_name: displayName.trim() }) });
       setMember(m => ({ ...m, display_name: displayName.trim() }));
       setEditingName(false);
       showToast("Display name updated!");
@@ -461,8 +457,6 @@ function MemberProfile({ member, setMember, showToast }) {
         <span style={{ background: "rgba(255,255,255,0.2)", padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{member.role}</span>
         <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.6 }}>Tap 📷 to change photo</p>
       </div>
-
-      {/* Display name editor */}
       <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
         <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.purple, fontSize: 14 }}>💬 Chat Display Name</p>
         {editingName ? (
@@ -479,7 +473,6 @@ function MemberProfile({ member, setMember, showToast }) {
         )}
         <p style={{ margin: "6px 0 0", fontSize: 11, color: "#aaa" }}>This name is shown in chat instead of your full name</p>
       </div>
-
       <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
         {[["📱 Phone", member.phone], ["🏷 Role", member.role], ["🗓 RSVPs", rsvps.length], ["💳 Payment", payment?.status || "Not submitted"], ["📆 Member Since", new Date(member.created_at).toLocaleDateString()]].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f5f5f5" }}>
@@ -499,65 +492,103 @@ function ChatPage({ member, showToast }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef();
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  const chatRef = useRef();
+  const inputRef = useRef();
+  const pollRef = useRef();
 
+  const senderId = member.id === "admin" ? null : member.id;
   const isAdmin = member?.role === "Admin" || member?.role === "SuperAdmin" || member?.role === "superadmin";
   const canPost = channel === "general" || isAdmin;
 
-  const fetchMsgs = useCallback(async () => {
-    const rows = await api(`messages?channel=eq.${channel}&select=*&order=created_at.asc&limit=100`);
-    setMessages(rows); setLoading(false);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-  }, [channel]);
+  const scrollToBottom = () => {
+    setTimeout(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, 80);
+  };
 
-  useEffect(() => { setLoading(true); fetchMsgs(); const t = setInterval(fetchMsgs, 4000); return () => clearInterval(t); }, [fetchMsgs]);
+  const fetchMsgs = useCallback(async (autoScroll = false) => {
+    try {
+      const rows = await api(`messages?channel=eq.${channel}&select=*&order=created_at.asc&limit=100`);
+      setMessages(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(rows) && autoScroll) scrollToBottom();
+        return rows;
+      });
+      setLoading(false);
+      if (!initialized) { scrollToBottom(); setInitialized(true); }
+    } catch { }
+  }, [channel, initialized]);
+
+  useEffect(() => {
+    setLoading(true); setInitialized(false); setMessages([]);
+    fetchMsgs(false);
+    pollRef.current = setInterval(() => fetchMsgs(true), 4000);
+    return () => clearInterval(pollRef.current);
+  }, [channel]);
 
   const send = async () => {
     if (!text.trim()) return;
     setSending(true);
+    const displayName = member.display_name || member.name;
+    const optimistic = { id: "temp-" + Date.now(), member_id: senderId, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: text.trim(), channel, created_at: new Date().toISOString() };
+    setMessages(prev => [...prev, optimistic]);
+    setText(""); setShowEmoji(false); scrollToBottom();
     try {
-      const displayName = member.display_name || member.name;
-      await api("messages", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: text.trim(), channel }) });
-      setText(""); fetchMsgs();
-    } catch (e) { showToast(e.message, "error"); }
-    finally { setSending(false); }
+      await api("messages", { method: "POST", body: JSON.stringify({ member_id: senderId, member_name: member.name, display_name: displayName, avatar: member.avatar || null, content: optimistic.content, channel }) });
+      fetchMsgs(false);
+    } catch (e) {
+      setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+      showToast(e.message, "error");
+    } finally { setSending(false); inputRef.current?.focus(); }
   };
 
+  const addEmoji = (emoji) => { setText(t => t + emoji); setShowEmoji(false); inputRef.current?.focus(); };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 160px)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 150px)", position: "relative" }}>
       <SecTitle>Community Chat</SecTitle>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         {[["general", "💬 General"], ["announcements", "📢 Announcements"]].map(([id, label]) => (
-          <button key={id} onClick={() => setChannel(id)} className="bp" style={{ flex: 1, padding: "9px", border: `2px solid ${channel === id ? C.purple : "#e0e0e0"}`, borderRadius: 12, background: channel === id ? C.gMain : "#fff", color: channel === id ? "#fff" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>{label}</button>
+          <button key={id} onClick={() => setChannel(id)} className="bp" style={{ flex: 1, padding: "9px", border: `2px solid ${channel === id ? C.purple : "#e0e0e0"}`, borderRadius: 12, background: channel === id ? C.gMain : "#fff", color: channel === id ? "#fff" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 700, transition: "all 0.2s" }}>{label}</button>
         ))}
       </div>
-      {channel === "announcements" && !isAdmin && <div style={{ background: "#fff9e0", border: `1px solid ${C.gold}`, borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#666" }}>📢 Only admins can post here.</div>}
-      <div style={{ flex: 1, background: "#fff", borderRadius: 16, padding: 12, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.07)", marginBottom: 10 }}>
+      {channel === "announcements" && !isAdmin && (
+        <div style={{ background: "#fff9e0", border: `1px solid ${C.gold}`, borderRadius: 10, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: "#888" }}>📢 Only admins can post here.</div>
+      )}
+      <div ref={chatRef} style={{ flex: 1, background: "#fff", borderRadius: 16, padding: "12px 10px", overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.07)", marginBottom: 8, backgroundImage: "radial-gradient(circle at 1px 1px, rgba(106,13,173,0.03) 1px, transparent 0)", backgroundSize: "20px 20px" }}>
         {loading && <Loader />}
         {!loading && messages.length === 0 && <Empty msg="No messages yet. Say hello! 👋" />}
         {messages.map((msg, i) => {
-          const isMe = msg.member_id === member.id;
+          const isMe = msg.member_id === senderId || (senderId === null && msg.member_name === member.name);
           const name = msg.display_name || msg.member_name || "?";
+          const showName = !isMe && (i === 0 || messages[i - 1]?.member_id !== msg.member_id);
+          const isConsec = i > 0 && messages[i - 1]?.member_id === msg.member_id;
           return (
-            <div key={msg.id} className="fu" style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 8, marginBottom: 12, alignItems: "flex-end", animationDelay: `${Math.min(i * 0.02, 0.3)}s` }}>
-              <div style={{ width: 30, height: 30, borderRadius: "50%", background: C.gMain, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13 }}>
-                {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]}
+            <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 6, marginBottom: isConsec ? 3 : 10, alignItems: "flex-end" }}>
+              <div style={{ width: 28, height: 28, flexShrink: 0, visibility: (!isMe && !isConsec) ? "visible" : "hidden" }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 11 }}>
+                  {msg.avatar ? <img src={msg.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : name[0]?.toUpperCase()}
+                </div>
               </div>
-              <div style={{ maxWidth: "72%" }}>
-                {!isMe && <p style={{ margin: "0 0 3px 4px", fontSize: 10, color: "#aaa", fontWeight: 600 }}>{name}</p>}
-                <div style={{ background: isMe ? C.gMain : "#f5f5f5", color: isMe ? "#fff" : "#333", padding: "9px 13px", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", fontSize: 13, lineHeight: 1.5 }}>{msg.content}</div>
-                <p style={{ margin: "3px 4px 0", fontSize: 10, color: "#ccc", textAlign: isMe ? "right" : "left" }}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+              <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+                {showName && <p style={{ margin: "0 0 2px 2px", fontSize: 10, color: C.mid, fontWeight: 700 }}>{name}</p>}
+                <div style={{ background: isMe ? C.gMain : "#f0f0f0", color: isMe ? "#fff" : "#222", padding: "8px 12px", borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px", fontSize: 13.5, lineHeight: 1.45, wordBreak: "break-word", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>{msg.content}</div>
+                <p style={{ margin: "2px 4px 0", fontSize: 9.5, color: "#bbb" }}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
+      {showEmoji && (
+        <div className="fi" style={{ background: "#fff", borderRadius: 14, padding: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)", marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 130, overflowY: "auto" }}>
+          {EMOJIS.map(e => <button key={e} onClick={() => addEmoji(e)} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", padding: "3px", borderRadius: 6 }}>{e}</button>)}
+        </div>
+      )}
       {canPost ? (
-        <div style={{ display: "flex", gap: 8, background: "#fff", borderRadius: 14, padding: "8px 8px 8px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }}>
-          <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent" }} />
-          <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 40, height: 40, background: text.trim() ? C.gMain : "#eee", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
-            {sending ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block", fontSize: 14 }}>⟳</span> : "➤"}
+        <div style={{ display: "flex", gap: 6, background: "#fff", borderRadius: 24, padding: "6px 6px 6px 14px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", alignItems: "center" }}>
+          <button onClick={() => setShowEmoji(s => !s)} style={{ fontSize: 22, background: "none", border: "none", cursor: "pointer", padding: "4px", flexShrink: 0, opacity: 0.7 }}>😊</button>
+          <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent", padding: "4px 0" }} />
+          <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 38, height: 38, background: text.trim() ? C.gMain : "#eee", border: "none", borderRadius: "50%", cursor: text.trim() ? "pointer" : "default", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s", flexShrink: 0 }}>
+            {sending ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block", fontSize: 12 }}>⟳</span> : "➤"}
           </button>
         </div>
       ) : (
@@ -574,13 +605,10 @@ function AdminApp({ session, logout, showToast }) {
   const [adminMember, setAdminMember] = useState(null);
 
   useEffect(() => {
-    if (session.memberId) {
-      api(`members?id=eq.${session.memberId}&select=*`).then(r => r[0] && setAdminMember(r[0]));
-    }
+    if (session.memberId) api(`members?id=eq.${session.memberId}&select=*`).then(r => r[0] && setAdminMember(r[0]));
   }, [session.memberId]);
 
   const chatMember = adminMember || { id: "admin", name: isSuperAdmin ? "Super Admin" : "Admin", role: isSuperAdmin ? "SuperAdmin" : "Admin", display_name: isSuperAdmin ? "Super Admin" : "Admin", avatar: null };
-
   const tabs = [{ id: "home", icon: "📊", label: "Dashboard" }, { id: "members", icon: "👥", label: "Members" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payments", icon: "💳", label: "Payments" }, { id: "chat", icon: "💬", label: "Chat" }];
 
   return (
@@ -612,12 +640,10 @@ function AdminApp({ session, logout, showToast }) {
 
 function AdminHome({ setPage, isSuperAdmin }) {
   const [stats, setStats] = useState({ members: 0, events: 0, confirmed: 0, pending: 0, total: 0 });
-
   useEffect(() => {
     Promise.all([api("members?select=id"), api("events?select=id"), api("payments?status=eq.Confirmed&select=amount"), api("payments?status=eq.Pending&select=id")])
       .then(([m, e, c, p]) => setStats({ members: m.length, events: e.length, confirmed: c.length, pending: p.length, total: c.reduce((s, x) => s + (x.amount || 0), 0) }));
   }, []);
-
   return (
     <div>
       <div className="fu" style={{ background: "linear-gradient(135deg,#1a0033,#3D0066)", borderRadius: 20, padding: 20, color: "#fff", marginBottom: 16, boxShadow: "0 8px 28px rgba(0,0,0,0.2)" }}>
@@ -656,6 +682,7 @@ function AdminMembers({ showToast, isSuperAdmin }) {
   const filtered = members.filter(m => (m.name.toLowerCase().includes(search.toLowerCase()) || m.phone.includes(search)) && (roleF === "All" || m.role === roleF));
 
   const remove = async (id) => {
+    if (!window.confirm("Remove this member?")) return;
     try { await api(`members?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setMembers(m => m.filter(x => x.id !== id)); showToast("Member removed"); }
     catch (e) { showToast(e.message, "error"); }
   };
@@ -703,13 +730,13 @@ function AdminMembers({ showToast, isSuperAdmin }) {
         <Modal onClose={() => setEditM(null)} title="Edit Member">
           <FIn label="Full Name" value={editM.name} onChange={v => setEditM(e => ({ ...e, name: v }))} />
           <FIn label="Phone" value={editM.phone} onChange={v => setEditM(e => ({ ...e, phone: v }))} />
-          <FIn label="💬 Display Name (chat)" value={editM.display_name || ""} onChange={v => setEditM(e => ({ ...e, display_name: v }))} placeholder="Name shown in chat" />
+          <FIn label="💬 Display Name" value={editM.display_name || ""} onChange={v => setEditM(e => ({ ...e, display_name: v }))} placeholder="Name shown in chat" />
           <div style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#444", display: "block", marginBottom: 6 }}>Role</label>
             <select value={editM.role} onChange={e => setEditM(m => ({ ...m, role: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
               {(isSuperAdmin ? ["Member", "Exec", "Admin"] : ["Member", "Exec"]).map(r => <option key={r}>{r}</option>)}
             </select>
-            {!isSuperAdmin && <p style={{ fontSize: 11, color: "#aaa", margin: "4px 0 0" }}>⚡ Only Super Admin can assign the Admin role.</p>}
+            {!isSuperAdmin && <p style={{ fontSize: 11, color: "#aaa", margin: "4px 0 0" }}>⚡ Only Super Admin can assign Admin role.</p>}
           </div>
           <GBtn onClick={saveEdit} full>Save Changes</GBtn>
         </Modal>
@@ -723,6 +750,7 @@ function AdminEvents({ showToast }) {
   const [payments, setPayments] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewFlyer, setViewFlyer] = useState(null);
   const blank = { name: "", date: "", description: "", capacity: "150", ticket_price: "20000", perk_limit: "50", perk_desc: "🎁 First 50 who pay get FREE 3 yards of Anniversary Fabric!", flyer: null };
   const [form, setForm] = useState(blank);
   const [loading, setLoading] = useState(true);
@@ -750,8 +778,9 @@ function AdminEvents({ showToast }) {
   };
 
   const del = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this event? This cannot be undone.")) return;
     try { await api(`events?id=eq.${id}`, { method: "DELETE", headers: { Prefer: "" } }); setEvents(e => e.filter(x => x.id !== id)); showToast("Event deleted"); }
-    catch (e) { showToast(e.message, "error"); }
+    catch (e) { showToast("Delete failed: " + e.message, "error"); }
   };
 
   if (loading) return <Loader />;
@@ -768,7 +797,7 @@ function AdminEvents({ showToast }) {
         const pct = evt.capacity ? Math.min(100, Math.round((confirmed / evt.capacity) * 100)) : 0;
         return (
           <div key={evt.id} className="fu ch" style={{ background: "#fff", borderRadius: 18, overflow: "hidden", marginBottom: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.07)", animationDelay: `${i * 0.07}s` }}>
-            {evt.flyer && <img src={evt.flyer} alt="flyer" style={{ width: "100%", maxHeight: 180, objectFit: "cover" }} />}
+            {evt.flyer && <img src={evt.flyer} alt="flyer" onClick={() => setViewFlyer(evt.flyer)} style={{ width: "100%", maxHeight: 180, objectFit: "cover", cursor: "pointer" }} title="Click to view full flyer" />}
             <div style={{ padding: 16 }}>
               <h3 style={{ color: C.purple, margin: "0 0 4px", fontSize: 16, fontWeight: 800 }}>{evt.name}</h3>
               <p style={{ fontSize: 12, color: "#999", margin: "0 0 4px" }}>📅 {evt.date} · ₦{(+evt.ticket_price).toLocaleString()} · Cap: {evt.capacity}</p>
@@ -800,6 +829,7 @@ function AdminEvents({ showToast }) {
           <GBtn onClick={save} loading={saving} full>{editing ? "Update Event" : "Create Event"}</GBtn>
         </Modal>
       )}
+      <FlyerModal flyer={viewFlyer} onClose={() => setViewFlyer(null)} />
     </div>
   );
 }
@@ -890,6 +920,19 @@ function AdminPayments({ showToast }) {
 }
 
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
+function FlyerModal({ flyer, onClose }) {
+  if (!flyer) return null;
+  return (
+    <div className="fi" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <img src={flyer} alt="flyer" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 12, objectFit: "contain" }} onClick={e => e.stopPropagation()} />
+      <div style={{ display: "flex", gap: 12, marginTop: 16 }} onClick={e => e.stopPropagation()}>
+        <a href={flyer} download="PHConnectz_Event_Flyer.jpg" style={{ padding: "10px 24px", background: C.gold, color: C.purple, borderRadius: 20, fontWeight: 800, fontSize: 14, textDecoration: "none" }}>⬇ Download Flyer</a>
+        <button onClick={onClose} style={{ padding: "10px 24px", background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 20, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✕ Close</button>
+      </div>
+    </div>
+  );
+}
+
 function Avi({ member, size = 40 }) {
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", background: C.gMain, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: size * 0.38, flexShrink: 0, border: `2px solid ${C.gold}` }}>
