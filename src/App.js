@@ -16,7 +16,7 @@ const api = async (path, opts) => {
 };
 
 const rNo = () => "PHC-" + Date.now().toString().slice(-7);
-const EMOJIS = ["😀", "😂", "😍", "🥰", "😎", "🤩", "😊", "🙌", "👏", "🔥", "❤️", "💯", "🎉", "👍", "😭", "😅", "🤣", "😤", "💪", "🙏", "👑", "✨", "🎊", "😆", "🤔", "👀", "💬", "📢", "🫡", "🥳"];
+const EMOJIS = ["😀","😂","😍","🥰","😎","🤩","😊","🙌","👏","🔥","❤️","💯","🎉","👍","😭","😅","🤣","😤","💪","🙏","👑","✨","🎊","😆","🤔","👀","💬","📢","🫡","🥳"];
 
 const C = {
   purple: "#3D0066", mid: "#6A0DAD", light: "#9B59B6",
@@ -92,7 +92,8 @@ function AuthScreen({ setSession, showToast }) {
     try {
       const existing = await api("members?phone=eq." + encodeURIComponent(rf.phone.trim()) + "&select=id");
       if (existing.length) return showToast("Phone number already registered", "error");
-      await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", password: rf.password, status: "Pending" }) });
+      const fullDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+      await api("members", { method: "POST", body: JSON.stringify({ name: rf.name.trim(), phone: rf.phone.trim(), display_name: rf.displayName.trim() || rf.name.trim(), role: "Member", password: rf.password, status: "Pending", joined_date: fullDate }) });
       showToast("Account created! Awaiting admin approval.");
       setTab("login"); setLf(f => ({ ...f, phone: rf.phone }));
     } catch (e) { showToast(e.message.includes("unique") ? "Phone already registered" : e.message, "error"); }
@@ -141,7 +142,7 @@ function AuthScreen({ setSession, showToast }) {
 function MemberApp({ session, logout, showToast }) {
   const [page, setPage] = useState("home");
   const [member, setMember] = useState(null);
-  useEffect(() => { api("members?id=eq." + session.memberId + "&select=*").then(r => r[0] && setMember(r[0])).catch(() => { }); }, [session.memberId]);
+  useEffect(() => { api("members?id=eq." + session.memberId + "&select=*").then(r => r[0] && setMember(r[0])).catch(() => {}); }, [session.memberId]);
   if (!member) return <Loader />;
   const tabs = [
     { id: "home", icon: "🏠", label: "Home" },
@@ -247,7 +248,7 @@ function MemberEvents({ member, showToast }) {
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0,0,0,0);
   const upcoming = events.filter(e => new Date(e.date) >= today);
   const past = events.filter(e => new Date(e.date) < today);
   const shown = tab === "upcoming" ? upcoming : past;
@@ -391,7 +392,7 @@ function MemberDirectory({ member }) {
               <span style={{ background: selected.role === "Admin" ? C.gold : "#f0e6ff", color: C.purple, padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>{selected.role}</span>
             </div>
             <div style={{ background: C.grey, borderRadius: 14, padding: 14 }}>
-              {[["Phone", selected.phone], ["Role", selected.role], ["Joined", new Date(selected.created_at).toLocaleDateString()]].map(([k, v]) => (
+              {[["Phone", selected.phone], ["Role", selected.role], ["Member Since", selected.joined_date || new Date(selected.created_at).toLocaleDateString("en-GB", { month: "long", year: "numeric" })]].map(([k, v]) => (
                 <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #eee" }}>
                   <span style={{ fontSize: 13, color: "#888" }}>{k}</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>{v}</span>
@@ -417,7 +418,7 @@ function MemberPayment({ member, showToast }) {
   const fileRef = useRef();
 
   useEffect(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0,0,0,0);
     Promise.all([api("payments?member_id=eq." + member.id + "&select=*"), api("events?select=*&order=date.asc")]).then(results => {
       setPayment(results[0][0] || null);
       const upcoming = results[1].filter(e => new Date(e.date) >= today);
@@ -531,31 +532,182 @@ function MemberReceipts({ member }) {
   const [payment, setPayment] = useState(null);
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
-  const receiptRef = useRef();
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    Promise.all([api("payments?member_id=eq." + member.id + "&status=eq.Confirmed&select=*"), api("events?select=*&limit=1")]).then(results => {
+    Promise.all([
+      api("payments?member_id=eq." + member.id + "&status=eq.Confirmed&select=*"),
+      api("events?select=*&limit=1")
+    ]).then(results => {
       setPayment(results[0][0] || null);
       setEvent(results[1][0] || null);
       setLoading(false);
     });
   }, [member.id]);
 
+  const generatePDF = async () => {
+    if (!payment) return;
+    setGenerating(true);
+    try {
+      // Load jsPDF from CDN
+      await new Promise((resolve, reject) => {
+        if (window.jspdf) { resolve(); return; }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a5", orientation: "portrait" });
+      const W = doc.internal.pageSize.getWidth();
+      const evtName = event ? event.name : "";
+      const evtPrice = event ? event.ticket_price : 20000;
+
+      // ── Purple header background
+      doc.setFillColor(61, 0, 102);
+      doc.rect(0, 0, W, 48, "F");
+
+      // ── Gold accent bar
+      doc.setFillColor(240, 192, 64);
+      doc.rect(0, 46, W, 3, "F");
+
+      // ── Crown emoji substitute — gold circle with crown text
+      doc.setFillColor(240, 192, 64);
+      doc.circle(W / 2, 16, 8, "F");
+      doc.setTextColor(61, 0, 102);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("PH", W / 2, 18.5, { align: "center" });
+
+      // ── App name
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("PH CONNECTZ", W / 2, 32, { align: "center" });
+
+      // ── Receipt label
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(240, 192, 64);
+      doc.text("OFFICIAL PAYMENT RECEIPT", W / 2, 40, { align: "center" });
+
+      // ── Receipt number box
+      doc.setFillColor(248, 240, 255);
+      doc.roundedRect(10, 54, W - 20, 12, 2, 2, "F");
+      doc.setTextColor(106, 13, 173);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("Receipt No.", 15, 61);
+      doc.setTextColor(61, 0, 102);
+      doc.setFontSize(9);
+      doc.text(payment.receipt_no || "", W - 15, 61, { align: "right" });
+
+      // ── Divider
+      doc.setDrawColor(240, 192, 64);
+      doc.setLineWidth(0.5);
+      doc.line(10, 70, W - 10, 70);
+
+      // ── Detail rows
+      const rows = [
+        ["Full Name", member.name],
+        ["Phone Number", member.phone],
+        ["Event", evtName],
+        ["Amount Paid", "NGN " + (+evtPrice).toLocaleString()],
+        ["Reference No.", payment.reference || ""],
+        ["Confirmed On", payment.confirmed_at ? new Date(payment.confirmed_at).toLocaleString() : ""],
+      ];
+
+      let y = 80;
+      rows.forEach(([label, value], i) => {
+        if (i % 2 === 0) {
+          doc.setFillColor(250, 248, 255);
+          doc.rect(10, y - 5, W - 20, 10, "F");
+        }
+        doc.setTextColor(150, 150, 150);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.text(label, 15, y);
+        doc.setTextColor(33, 33, 33);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        const lines = doc.splitTextToSize(String(value), 80);
+        doc.text(lines, W - 15, y, { align: "right" });
+        y += 12;
+      });
+
+      // ── Perk badge
+      if (payment.perk_eligible) {
+        y += 4;
+        doc.setFillColor(255, 249, 224);
+        doc.setDrawColor(240, 192, 64);
+        doc.setLineWidth(0.8);
+        doc.roundedRect(10, y, W - 20, 18, 3, 3, "FD");
+        doc.setTextColor(61, 0, 102);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text("🎁 PERK UNLOCKED!", W / 2, y + 7, { align: "center" });
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 100, 100);
+        doc.text("You qualify for FREE 3 yards of Anniversary Fabric!", W / 2, y + 13, { align: "center" });
+        y += 26;
+      }
+
+      // ── Bottom divider
+      y += 6;
+      doc.setDrawColor(240, 192, 64);
+      doc.setLineDashPattern([2, 2], 0);
+      doc.line(10, y, W - 10, y);
+      doc.setLineDashPattern([], 0);
+
+      // ── Thank you message
+      y += 8;
+      doc.setTextColor(61, 0, 102);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("Thank you for being part of PH Connectz!", W / 2, y, { align: "center" });
+      y += 6;
+      doc.setTextColor(130, 130, 130);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text("See you at the celebration!", W / 2, y, { align: "center" });
+
+      // ── Footer
+      y += 10;
+      doc.setFillColor(61, 0, 102);
+      doc.rect(0, y, W, 10, "F");
+      doc.setTextColor(240, 192, 64);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.text("PH CONNECTZ \u2014 Verified Payment Receipt", W / 2, y + 6, { align: "center" });
+
+      // ── Save
+      const filename = "PHConnectz_Receipt_" + member.name.replace(/ /g, "_") + ".pdf";
+      doc.save(filename);
+    } catch (e) {
+      alert("Could not generate PDF. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const shareWA = () => {
     if (!payment) return;
     const evtName = event ? event.name : "";
     const evtPrice = event ? event.ticket_price : 20000;
-    const msg = "👑 *PH CONNECTZ PAYMENT RECEIPT*\n\nReceipt No: " + payment.receipt_no + "\nName: " + member.name + "\nPhone: " + member.phone + "\nEvent: " + evtName + "\nAmount: ₦" + (+evtPrice).toLocaleString() + "\nRef: " + payment.reference + "\nStatus: ✅ Confirmed\n\nThank you for being part of PH Connectz! 🎉";
+    const msg = "👑 *PH CONNECTZ PAYMENT RECEIPT*\n\n"
+      + "Receipt No: " + (payment.receipt_no || "") + "\n"
+      + "Name: " + member.name + "\n"
+      + "Phone: " + member.phone + "\n"
+      + "Event: " + evtName + "\n"
+      + "Amount: ₦" + (+evtPrice).toLocaleString() + "\n"
+      + "Ref: " + (payment.reference || "") + "\n"
+      + "Status: ✅ Confirmed\n"
+      + (payment.perk_eligible ? "\n🎁 You qualify for FREE 3 yards of Anniversary Fabric!\n" : "")
+      + "\nThank you for being part of PH Connectz! 🎉";
     window.open("https://wa.me/?text=" + encodeURIComponent(msg));
-  };
-
-  const print = () => {
-    const el = receiptRef.current;
-    if (!el) return;
-    const w = window.open("", "_blank");
-    const s = "<scr" + "ipt>window.print();window.close();</" + "script>";
-    w.document.write("<html><head><title>PHConnectz Receipt</title></head><body>" + el.outerHTML + s + "</body></html>");
-    w.document.close();
   };
 
   if (loading) return <Loader />;
@@ -573,7 +725,8 @@ function MemberReceipts({ member }) {
         </div>
       ) : (
         <div>
-          <div ref={receiptRef} className="fu" style={{ background: "#fff", border: "3px solid " + C.gold, borderRadius: 20, overflow: "hidden", marginBottom: 14, boxShadow: "0 8px 28px rgba(240,192,64,0.2)" }}>
+          {/* Receipt preview card */}
+          <div className="fu" style={{ background: "#fff", border: "3px solid " + C.gold, borderRadius: 20, overflow: "hidden", marginBottom: 14, boxShadow: "0 8px 28px rgba(240,192,64,0.2)" }}>
             <div style={{ background: C.gMain, padding: "22px 24px", textAlign: "center" }}>
               <div style={{ fontSize: 38 }}>👑</div>
               <h2 style={{ color: "#fff", margin: "4px 0 2px", fontSize: 20, fontWeight: 900, letterSpacing: 1 }}>PH CONNECTZ</h2>
@@ -602,10 +755,17 @@ function MemberReceipts({ member }) {
               </div>
             </div>
           </div>
+
+          {/* Action buttons */}
           <div style={{ display: "flex", gap: 10 }}>
-            <GBtn onClick={print} style={{ flex: 1, background: "linear-gradient(135deg,#1DB954,#158a3e)" }}>Print</GBtn>
-            <GBtn onClick={shareWA} style={{ flex: 1, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>WhatsApp</GBtn>
+            <GBtn onClick={generatePDF} loading={generating} style={{ flex: 1, background: C.gMain }}>
+              {generating ? "Generating…" : "⬇ Download PDF"}
+            </GBtn>
+            <GBtn onClick={shareWA} style={{ flex: 1, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
+              📲 WhatsApp
+            </GBtn>
           </div>
+          <p style={{ fontSize: 11, color: "#aaa", textAlign: "center", marginTop: 8 }}>PDF includes all receipt details and is formatted for printing.</p>
         </div>
       )}
     </div>
@@ -617,8 +777,16 @@ function MemberProfile({ member, setMember, showToast }) {
   const [payment, setPayment] = useState(null);
   const [displayName, setDisplayName] = useState(member.display_name || "");
   const [editingName, setEditingName] = useState(false);
+  const [editingJoined, setEditingJoined] = useState(false);
+  const [joinedMonth, setJoinedMonth] = useState("");
+  const [joinedYear, setJoinedYear] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingJoined, setSavingJoined] = useState(false);
   const fileRef = useRef();
+
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const currentYear = new Date().getFullYear();
+  const YEARS = Array.from({ length: 30 }, (_, i) => String(currentYear - i));
 
   useEffect(() => {
     api("rsvps?member_id=eq." + member.id + "&select=*").then(setRsvps);
@@ -653,6 +821,21 @@ function MemberProfile({ member, setMember, showToast }) {
     finally { setSaving(false); }
   };
 
+  const saveJoinedDate = async () => {
+    if (!joinedMonth || !joinedYear) return showToast("Please select both month and year", "error");
+    setSavingJoined(true);
+    const val = joinedMonth + " " + joinedYear;
+    try {
+      await api("members?id=eq." + member.id, { method: "PATCH", body: JSON.stringify({ joined_date: val }) });
+      setMember(m => Object.assign({}, m, { joined_date: val }));
+      setEditingJoined(false);
+      showToast("Member since updated!");
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setSavingJoined(false); }
+  };
+
+  const displayJoined = member.joined_date || new Date(member.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
   return (
     <div>
       <SecTitle>My Profile</SecTitle>
@@ -668,8 +851,10 @@ function MemberProfile({ member, setMember, showToast }) {
         <p style={{ margin: "0 0 6px", fontSize: 13, opacity: 0.8 }}>{"💬 " + (member.display_name || "No display name set")}</p>
         <span style={{ background: "rgba(255,255,255,0.2)", padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{member.role}</span>
       </div>
+
+      {/* Display name editor */}
       <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
-        <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.purple, fontSize: 14 }}>Chat Display Name</p>
+        <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.purple, fontSize: 14 }}>💬 Chat Display Name</p>
         {editingName ? (
           <div style={{ display: "flex", gap: 8 }}>
             <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Your display name" style={{ flex: 1, padding: "9px 12px", border: "2px solid #eee", borderRadius: 10, fontSize: 13 }} />
@@ -684,8 +869,40 @@ function MemberProfile({ member, setMember, showToast }) {
         )}
         <p style={{ margin: "6px 0 0", fontSize: 11, color: "#aaa" }}>Shown in chat instead of your full name</p>
       </div>
+
+      {/* Member Since editor */}
+      <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
+        <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.purple, fontSize: 14 }}>📅 Member Since</p>
+        {editingJoined ? (
+          <div>
+            <p style={{ fontSize: 12, color: "#888", margin: "0 0 10px" }}>Select the month and year you joined PH Connectz:</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <select value={joinedMonth} onChange={e => setJoinedMonth(e.target.value)} style={{ flex: 2, padding: "9px 10px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
+                <option value="">Month</option>
+                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <select value={joinedYear} onChange={e => setJoinedYear(e.target.value)} style={{ flex: 1, padding: "9px 10px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
+                <option value="">Year</option>
+                {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <GBtn onClick={saveJoinedDate} loading={savingJoined} style={{ flex: 1 }}>Save</GBtn>
+              <button onClick={() => setEditingJoined(false)} style={{ flex: 1, padding: "11px", border: "2px solid #eee", borderRadius: 12, background: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: "#555", fontWeight: 600 }}>{displayJoined}</span>
+            <button onClick={() => { setEditingJoined(true); setJoinedMonth(""); setJoinedYear(""); }} style={{ background: "#f0e6ff", border: "none", color: C.purple, padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Edit</button>
+          </div>
+        )}
+        <p style={{ margin: "6px 0 0", fontSize: 11, color: "#aaa" }}>Older members can set the month and year they joined the group</p>
+      </div>
+
+      {/* Details */}
       <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
-        {[["Phone", member.phone], ["Role", member.role], ["RSVPs", rsvps.length], ["Payment", payment ? payment.status : "Not submitted"], ["Member Since", new Date(member.created_at).toLocaleDateString()]].map(([k, v]) => (
+        {[["Phone", member.phone], ["Role", member.role], ["RSVPs", rsvps.length], ["Payment", payment ? payment.status : "Not submitted"]].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f5f5f5" }}>
             <span style={{ fontSize: 13, color: "#888" }}>{k}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>{v}</span>
@@ -723,7 +940,7 @@ function ChatPage({ member, showToast }) {
       });
       setLoading(false);
       if (!initialized) { scrollToBottom(); setInitialized(true); }
-    } catch { }
+    } catch {}
   }, [channel, initialized]);
 
   useEffect(() => {
@@ -762,8 +979,8 @@ function ChatPage({ member, showToast }) {
         {messages.map((msg, i) => {
           const isMe = msg.member_id === senderId || (senderId === null && msg.member_name === member.name);
           const name = msg.display_name || msg.member_name || "?";
-          const showName = !isMe && (i === 0 || messages[i - 1].member_id !== msg.member_id);
-          const isConsec = i > 0 && messages[i - 1].member_id === msg.member_id && messages[i - 1].member_id !== null;
+          const showName = !isMe && (i === 0 || messages[i-1].member_id !== msg.member_id);
+          const isConsec = i > 0 && messages[i-1].member_id === msg.member_id && messages[i-1].member_id !== null;
           return (
             <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 6, marginBottom: isConsec ? 2 : 8, alignItems: "flex-end", paddingLeft: isMe ? 40 : 0, paddingRight: isMe ? 0 : 40 }}>
               <div style={{ width: 32, height: 32, flexShrink: 0, alignSelf: "flex-end" }}>
@@ -796,7 +1013,7 @@ function ChatPage({ member, showToast }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <div style={{ flex: 1, display: "flex", gap: 6, background: "#fff", borderRadius: 24, padding: "6px 6px 6px 14px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", alignItems: "center" }}>
             <button onClick={() => setShowEmoji(s => !s)} style={{ fontSize: 22, background: "none", border: "none", cursor: "pointer", padding: "2px", flexShrink: 0, opacity: 0.6 }}>😊</button>
-            <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent", padding: "4px 0" }} />
+            <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }}} placeholder={channel === "announcements" ? "Post an announcement…" : "Type a message…"} style={{ flex: 1, border: "none", fontSize: 14, outline: "none", background: "transparent", padding: "4px 0" }} />
           </div>
           <button onClick={send} disabled={sending || !text.trim()} className="bp" style={{ width: 44, height: 44, background: text.trim() ? "#25D366" : "#aaa", border: "none", borderRadius: "50%", cursor: text.trim() ? "pointer" : "default", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
             {sending ? <span style={{ animation: "spin 0.8s linear infinite", display: "inline-block", fontSize: 12, color: "#fff" }}>⟳</span> : <span style={{ color: "#fff" }}>➤</span>}
@@ -816,7 +1033,7 @@ function AdminApp({ session, logout, showToast }) {
   const [adminMember, setAdminMember] = useState(null);
   useEffect(() => { if (session.memberId) api("members?id=eq." + session.memberId + "&select=*").then(r => r[0] && setAdminMember(r[0])); }, [session.memberId]);
   const chatMember = adminMember || { id: "admin", name: isSuperAdmin ? "Super Admin" : "Admin", role: isSuperAdmin ? "SuperAdmin" : "Admin", display_name: isSuperAdmin ? "Super Admin" : "Admin", avatar: null };
-  const tabs = [{ id: "home", icon: "📊", label: "Dashboard" }, { id: "members", icon: "👥", label: "Members" }, { id: "events", icon: "🗓", label: "Events" }, { id: "payments", icon: "💳", label: "Payments" }, { id: "chat", icon: "💬", label: "Chat" }];
+  const tabs = [{ id:"home",icon:"📊",label:"Dashboard"},{id:"members",icon:"👥",label:"Members"},{id:"events",icon:"🗓",label:"Events"},{id:"payments",icon:"💳",label:"Payments"},{id:"chat",icon:"💬",label:"Chat"}];
   return (
     <div style={{ minHeight: "100vh", background: C.grey, paddingBottom: 76 }}>
       <header style={{ background: "linear-gradient(90deg,#1a0033,#3D0066)", color: "#fff", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.35)" }}>
@@ -867,17 +1084,17 @@ function AdminHome({ setPage, isSuperAdmin }) {
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-        {[["👥", "Total Members", stats.members, C.mid], ["🗓", "Events", stats.events, C.light], ["💰", "Collected", "₦" + stats.total.toLocaleString(), C.green], ["⏳", "Pending Payments", stats.payPending, C.orange]].map(([icon, label, val, color], i) => (
-          <div key={label} className="fu ch" style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 4px 14px rgba(0,0,0,0.06)", borderTop: "4px solid " + color, animationDelay: (i * 0.07) + "s" }}>
-            <div style={{ fontSize: 24 }}>{icon}</div>
-            <div style={{ fontSize: 22, fontWeight: 900, color, margin: "4px 0 2px" }}>{val}</div>
-            <div style={{ fontSize: 11, color: "#aaa" }}>{label}</div>
+        {[["👥","Total Members",stats.members,C.mid],["🗓","Events",stats.events,C.light],["💰","Collected","₦" + stats.total.toLocaleString(),C.green],["⏳","Pending Payments",stats.payPending,C.orange]].map(([icon,label,val,color],i) => (
+          <div key={label} className="fu ch" style={{ background:"#fff",borderRadius:14,padding:14,boxShadow:"0 4px 14px rgba(0,0,0,0.06)",borderTop:"4px solid "+color,animationDelay:(i*0.07)+"s" }}>
+            <div style={{fontSize:24}}>{icon}</div>
+            <div style={{fontSize:22,fontWeight:900,color,margin:"4px 0 2px"}}>{val}</div>
+            <div style={{fontSize:11,color:"#aaa"}}>{label}</div>
           </div>
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {[["Manage Members", "members", C.gMain], ["Create / Edit Events", "events", "linear-gradient(135deg," + C.light + "," + C.mid + ")"], ["Review Payments", "payments", "linear-gradient(135deg," + C.green + ",#158a3e)"]].map(([label, pg, bg]) => (
-          <button key={pg} onClick={() => setPage(pg)} className="bp ch" style={{ padding: "13px 18px", background: bg, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 700, fontSize: 14, textAlign: "left", boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}>{label}</button>
+        {[["Manage Members","members",C.gMain],["Create / Edit Events","events","linear-gradient(135deg,"+C.light+","+C.mid+")"],["Review Payments","payments","linear-gradient(135deg,"+C.green+",#158a3e)"]].map(([label,pg,bg]) => (
+          <button key={pg} onClick={() => setPage(pg)} className="bp ch" style={{ padding:"13px 18px",background:bg,color:"#fff",border:"none",borderRadius:12,cursor:"pointer",fontWeight:700,fontSize:14,textAlign:"left",boxShadow:"0 4px 14px rgba(0,0,0,0.12)" }}>{label}</button>
         ))}
       </div>
     </div>
@@ -920,10 +1137,10 @@ function AdminMembers({ showToast, isSuperAdmin }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / phone…" style={{ flex: 1, minWidth: 140, padding: "10px 14px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }} />
         <select value={roleF} onChange={e => setRoleF(e.target.value)} style={{ padding: "10px 8px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
-          {["All", "Member", "Exec", "Admin"].map(r => <option key={r}>{r}</option>)}
+          {["All","Member","Exec","Admin"].map(r => <option key={r}>{r}</option>)}
         </select>
         <select value={statusF} onChange={e => setStatusF(e.target.value)} style={{ padding: "10px 8px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
-          {["All", "Pending", "Active", "Suspended"].map(s => <option key={s}>{s}</option>)}
+          {["All","Pending","Active","Suspended"].map(s => <option key={s}>{s}</option>)}
         </select>
       </div>
       {filtered.length === 0 && <Empty msg="No members found." />}
@@ -968,7 +1185,7 @@ function AdminMembers({ showToast, isSuperAdmin }) {
           <div style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#444", display: "block", marginBottom: 6 }}>Role</label>
             <select value={editM.role} onChange={e => setEditM(m => Object.assign({}, m, { role: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: "2px solid #eee", borderRadius: 10, fontSize: 13, background: "#fff" }}>
-              {(isSuperAdmin ? ["Member", "Exec", "Admin"] : ["Member", "Exec"]).map(r => <option key={r}>{r}</option>)}
+              {(isSuperAdmin ? ["Member","Exec","Admin"] : ["Member","Exec"]).map(r => <option key={r}>{r}</option>)}
             </select>
             {!isSuperAdmin && <p style={{ fontSize: 11, color: "#aaa", margin: "4px 0 0" }}>Only Super Admin can assign Admin role.</p>}
           </div>
@@ -1096,16 +1313,16 @@ function AdminPayments({ showToast }) {
     <div>
       <SecTitle>Payments</SecTitle>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-        {[["Confirmed", confirmed.length, C.green], ["Pending", pending.length, C.orange], ["Collected", "₦" + total.toLocaleString(), C.purple], ["Slots Left", evt ? evt.capacity - confirmed.length : "—", C.light]].map(([label, val, color]) => (
-          <div key={label} className="fu ch" style={{ background: "#fff", borderRadius: 14, padding: 13, boxShadow: "0 4px 14px rgba(0,0,0,0.06)", borderTop: "4px solid " + color }}>
-            <div style={{ fontSize: 19, fontWeight: 900, color, margin: "3px 0 2px" }}>{val}</div>
-            <div style={{ fontSize: 11, color: "#aaa" }}>{label}</div>
+        {[["Confirmed",confirmed.length,C.green],["Pending",pending.length,C.orange],["Collected","₦"+total.toLocaleString(),C.purple],["Slots Left",evt?evt.capacity-confirmed.length:"—",C.light]].map(([label,val,color]) => (
+          <div key={label} className="fu ch" style={{ background:"#fff",borderRadius:14,padding:13,boxShadow:"0 4px 14px rgba(0,0,0,0.06)",borderTop:"4px solid "+color }}>
+            <div style={{fontSize:19,fontWeight:900,color,margin:"3px 0 2px"}}>{val}</div>
+            <div style={{fontSize:11,color:"#aaa"}}>{label}</div>
           </div>
         ))}
       </div>
       <div style={{ display: "flex", gap: 7, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
-        {["All", "Pending", "Confirmed", "Rejected"].map(f => (
-          <button key={f} onClick={() => setFilter(f)} className="bp" style={{ padding: "7px 14px", border: "2px solid " + (filter === f ? C.purple : "#e0e0e0"), borderRadius: 20, background: filter === f ? C.gMain : "#fff", color: filter === f ? "#fff" : "#666", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}>{f}</button>
+        {["All","Pending","Confirmed","Rejected"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} className="bp" style={{ padding: "7px 14px", border: "2px solid " + (filter===f?C.purple:"#e0e0e0"), borderRadius: 20, background: filter===f?C.gMain:"#fff", color: filter===f?"#fff":"#666", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}>{f}</button>
         ))}
       </div>
       {shown.length === 0 && <Empty msg="No payments found." />}
