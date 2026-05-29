@@ -408,25 +408,30 @@ function MemberDirectory({ member }) {
 }
 
 function MemberPayment({ member, showToast }) {
-  const [payment, setPayment] = useState(null);
+  const [payments, setPayments] = useState([]);
   const [ref, setRef] = useState("");
   const [imgData, setImgData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [viewMode, setViewMode] = useState("list"); // "list" | "submit"
   const fileRef = useRef();
 
-  useEffect(() => {
+  const load = () => {
     const today = new Date(); today.setHours(0,0,0,0);
-    Promise.all([api("payments?member_id=eq." + member.id + "&select=*"), api("events?select=*&order=date.asc")]).then(results => {
-      setPayment(results[0][0] || null);
+    Promise.all([
+      api("payments?member_id=eq." + member.id + "&select=*&order=submitted_at.desc"),
+      api("events?select=*&order=date.asc")
+    ]).then(results => {
+      setPayments(results[0]);
       const upcoming = results[1].filter(e => new Date(e.date) >= today);
       setEvents(upcoming);
-      if (upcoming.length === 1) setSelectedEvent(upcoming[0]);
       setLoading(false);
     });
-  }, [member.id]);
+  };
+
+  useEffect(() => { load(); }, [member.id]);
 
   const handleFile = e => {
     const file = e.target.files[0];
@@ -442,28 +447,47 @@ function MemberPayment({ member, showToast }) {
     if (!selectedEvent) return showToast("Please select an event", "error");
     if (!imgData) return showToast("Please upload your bank receipt", "error");
     if (!ref.trim()) return showToast("Please enter your reference number", "error");
+    // Check if already paid for this event
+    const existing = payments.find(p => p.event_id === selectedEvent.id && (p.status === "Pending" || p.status === "Confirmed"));
+    if (existing) return showToast("You already have a " + existing.status.toLowerCase() + " payment for this event", "error");
     setSubmitting(true);
     try {
-      const rows = await api("payments", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, phone: member.phone, event_id: selectedEvent.id, event_name: selectedEvent.name, amount: selectedEvent.ticket_price, reference: ref.trim(), receipt_image: imgData, status: "Pending" }) });
-      setPayment(rows[0]);
+      await api("payments", { method: "POST", body: JSON.stringify({ member_id: member.id, member_name: member.name, phone: member.phone, event_id: selectedEvent.id, event_name: selectedEvent.name, amount: selectedEvent.ticket_price, reference: ref.trim(), receipt_image: imgData, status: "Pending" }) });
       showToast("Receipt submitted! Awaiting confirmation.");
+      setRef(""); setImgData(null); setSelectedEvent(null); setViewMode("list");
+      load();
     } catch (e) { showToast(e.message, "error"); }
     finally { setSubmitting(false); }
   };
 
+  // Events that still need payment (no pending/confirmed payment yet)
+  const paidEventIds = payments.filter(p => p.status === "Pending" || p.status === "Confirmed").map(p => p.event_id);
+  const unpaidEvents = events.filter(e => !paidEventIds.includes(e.event_id) && !paidEventIds.includes(e.id));
+
   if (loading) return <Loader />;
+
   return (
     <div>
-      <SecTitle>My Payment</SecTitle>
-      {!payment ? (
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <SecTitle style={{ margin: 0 }}>My Payments</SecTitle>
+        {unpaidEvents.length > 0 && viewMode === "list" && (
+          <GBtn onClick={() => setViewMode("submit")} style={{ fontSize: 13, padding: "9px 16px" }}>+ New Payment</GBtn>
+        )}
+        {viewMode === "submit" && (
+          <button onClick={() => { setViewMode("list"); setRef(""); setImgData(null); setSelectedEvent(null); }} style={{ background: "#f0e6ff", border: "none", color: C.purple, padding: "8px 14px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>← Back</button>
+        )}
+      </div>
+
+      {viewMode === "submit" ? (
         <div className="fu" style={{ background: "#fff", borderRadius: 18, padding: 20, boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}>
-          {events.length === 0 && <Empty msg="No upcoming events to pay for." />}
-          {events.length > 0 && (
+          {unpaidEvents.length === 0 ? (
+            <Empty msg="No upcoming events available for payment." />
+          ) : (
             <div>
-              {events.length > 1 && (
+              {unpaidEvents.length > 1 && (
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#444", display: "block", marginBottom: 8 }}>Select Event</label>
-                  {events.map(evt => {
+                  {unpaidEvents.map(evt => {
                     const isSel = selectedEvent && selectedEvent.id === evt.id;
                     return (
                       <div key={evt.id} onClick={() => setSelectedEvent(evt)} style={{ border: "2px solid " + (isSel ? C.purple : "#eee"), borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer", background: isSel ? "#f8f0ff" : "#fff" }}>
@@ -482,10 +506,10 @@ function MemberPayment({ member, showToast }) {
                   })}
                 </div>
               )}
-              {events.length === 1 && selectedEvent && (
-                <div style={{ marginBottom: 14 }}>
-                  <h3 style={{ color: C.purple, margin: "0 0 4px", fontSize: 16, fontWeight: 800 }}>{selectedEvent.name}</h3>
-                  <p style={{ color: C.green, fontWeight: 800, fontSize: 22, margin: "0 0 16px" }}>{"₦" + (+selectedEvent.ticket_price).toLocaleString()}</p>
+              {unpaidEvents.length === 1 && (
+                <div style={{ marginBottom: 14 }} ref={() => { if (!selectedEvent) setSelectedEvent(unpaidEvents[0]); }}>
+                  <h3 style={{ color: C.purple, margin: "0 0 4px", fontSize: 16, fontWeight: 800 }}>{unpaidEvents[0].name}</h3>
+                  <p style={{ color: C.green, fontWeight: 800, fontSize: 22, margin: "0 0 16px" }}>{"₦" + (+unpaidEvents[0].ticket_price).toLocaleString()}</p>
                 </div>
               )}
               <FIn label="Reference Number" value={ref} onChange={setRef} placeholder="e.g. TRF20240816XXXX" />
@@ -505,21 +529,42 @@ function MemberPayment({ member, showToast }) {
         </div>
       ) : (
         <div>
-          <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontWeight: 700 }}>Payment Status</span>
-              <SBadge status={payment.status} />
+          {payments.length === 0 && (
+            <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 24, textAlign: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
+              <div style={{ fontSize: 40 }}>💳</div>
+              <p style={{ color: "#aaa", fontSize: 14, margin: "8px 0 0" }}>No payments submitted yet.</p>
+              {unpaidEvents.length > 0 && <GBtn onClick={() => setViewMode("submit")} style={{ margin: "14px auto 0" }}>Submit Your First Payment</GBtn>}
             </div>
-            <p style={{ fontSize: 13, color: "#555", margin: "0 0 4px", fontWeight: 600 }}>{payment.event_name}</p>
-            <p style={{ fontSize: 13, color: "#777", margin: 0 }}>Ref: <b>{payment.reference}</b></p>
-            {payment.receipt_image && <img src={payment.receipt_image} alt="receipt" style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 10, marginTop: 10, border: "1px solid #eee" }} />}
-            {payment.status === "Rejected" && <p style={{ fontSize: 13, color: C.red, marginTop: 8, fontWeight: 600 }}>Payment was rejected. Please contact an admin.</p>}
-          </div>
-          {payment.status === "Confirmed" && (
-            <div className="fu" style={{ background: "#e6f9ef", border: "2px solid #1DB954", borderRadius: 14, padding: 16, textAlign: "center" }}>
-              <div style={{ fontSize: 36 }}>🧾</div>
-              <p style={{ color: "#1DB954", fontWeight: 800, margin: "6px 0 4px", fontSize: 15 }}>Payment Confirmed!</p>
-              <p style={{ fontSize: 13, color: "#555", margin: 0 }}>Your official receipt is in the Receipts tab.</p>
+          )}
+          {payments.map((p, i) => (
+            <div key={p.id} className="fu ch" style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.07)", animationDelay: (i * 0.05) + "s" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div>
+                  <p style={{ margin: "0 0 3px", fontWeight: 800, color: C.purple, fontSize: 15 }}>{p.event_name}</p>
+                  <p style={{ margin: "0 0 3px", fontSize: 13, color: "#777" }}>Ref: <b>{p.reference}</b></p>
+                  <p style={{ margin: 0, fontSize: 12, color: "#aaa" }}>{new Date(p.submitted_at).toLocaleDateString()}</p>
+                </div>
+                <SBadge status={p.status} />
+              </div>
+              {p.receipt_image && (
+                <img src={p.receipt_image} alt="receipt" style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 10, border: "1px solid #eee", marginBottom: 8 }} />
+              )}
+              {p.status === "Rejected" && (
+                <div style={{ background: "#fce4ec", borderRadius: 10, padding: "8px 12px" }}>
+                  <p style={{ margin: 0, fontSize: 12, color: C.red, fontWeight: 600 }}>❌ Payment rejected. Please contact an admin or resubmit.</p>
+                </div>
+              )}
+              {p.status === "Confirmed" && (
+                <div style={{ background: "#e6f9ef", border: "1px solid #1DB954", borderRadius: 10, padding: "8px 12px" }}>
+                  <p style={{ margin: 0, fontSize: 12, color: C.green, fontWeight: 600 }}>✅ Confirmed! Your receipt is in the Receipts tab.</p>
+                </div>
+              )}
+            </div>
+          ))}
+          {unpaidEvents.length > 0 && payments.length > 0 && (
+            <div style={{ background: "#f8f0ff", border: "2px dashed " + C.mid, borderRadius: 14, padding: 16, textAlign: "center", marginTop: 8 }}>
+              <p style={{ color: C.purple, fontWeight: 700, margin: "0 0 8px" }}>{"You have " + unpaidEvents.length + " unpaid event" + (unpaidEvents.length > 1 ? "s" : "") + "!"}</p>
+              <GBtn onClick={() => setViewMode("submit")} style={{ margin: "0 auto" }}>Submit Payment</GBtn>
             </div>
           )}
         </div>
@@ -529,174 +574,159 @@ function MemberPayment({ member, showToast }) {
 }
 
 function MemberReceipts({ member }) {
-  const [payment, setPayment] = useState(null);
-  const [event, setEvent] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [generating, setGenerating] = useState(null); // payment id being generated
+  const [savingImg, setSavingImg] = useState(null);
 
   useEffect(() => {
     Promise.all([
-      api("payments?member_id=eq." + member.id + "&status=eq.Confirmed&select=*"),
-      api("events?select=*&limit=1")
-    ]).then(results => {
-      setPayment(results[0][0] || null);
-      setEvent(results[1][0] || null);
-      setLoading(false);
-    });
+      api("payments?member_id=eq." + member.id + "&status=eq.Confirmed&select=*&order=confirmed_at.desc"),
+      api("events?select=*")
+    ]).then(results => { setPayments(results[0]); setEvents(results[1]); setLoading(false); });
   }, [member.id]);
 
-  const generatePDF = async () => {
-    if (!payment) return;
-    setGenerating(true);
-    try {
-      // Load jsPDF from CDN
-      await new Promise((resolve, reject) => {
-        if (window.jspdf) { resolve(); return; }
-        const script = document.createElement("script");
-        script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
+  const getEvent = (eventId) => events.find(e => e.id === eventId) || {};
 
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "a5", orientation: "portrait" });
-      const W = doc.internal.pageSize.getWidth();
-      const evtName = event ? event.name : "";
-      const evtPrice = event ? event.ticket_price : 20000;
+  const loadJsPDF = () => new Promise((resolve, reject) => {
+    if (window.jspdf) { resolve(); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    script.onload = resolve; script.onerror = reject;
+    document.head.appendChild(script);
+  });
 
-      // ── Purple header background
-      doc.setFillColor(61, 0, 102);
-      doc.rect(0, 0, W, 48, "F");
+  const buildPDF = (payment, event) => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a5", orientation: "portrait" });
+    const W = doc.internal.pageSize.getWidth();
+    const evtPrice = event ? event.ticket_price : 20000;
 
-      // ── Gold accent bar
-      doc.setFillColor(240, 192, 64);
-      doc.rect(0, 46, W, 3, "F");
+    doc.setFillColor(61, 0, 102);
+    doc.rect(0, 0, W, 48, "F");
+    doc.setFillColor(240, 192, 64);
+    doc.rect(0, 46, W, 3, "F");
+    doc.setFillColor(240, 192, 64);
+    doc.circle(W / 2, 16, 8, "F");
+    doc.setTextColor(61, 0, 102);
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text("PH", W / 2, 18.5, { align: "center" });
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("PH CONNECTZ", W / 2, 32, { align: "center" });
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(240, 192, 64);
+    doc.text("OFFICIAL PAYMENT RECEIPT", W / 2, 40, { align: "center" });
+    doc.setFillColor(248, 240, 255);
+    doc.roundedRect(10, 54, W - 20, 12, 2, 2, "F");
+    doc.setTextColor(106, 13, 173);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("Receipt No.", 15, 61);
+    doc.setTextColor(61, 0, 102);
+    doc.setFontSize(9);
+    doc.text(payment.receipt_no || "", W - 15, 61, { align: "right" });
+    doc.setDrawColor(240, 192, 64);
+    doc.setLineWidth(0.5);
+    doc.line(10, 70, W - 10, 70);
 
-      // ── Crown emoji substitute — gold circle with crown text
-      doc.setFillColor(240, 192, 64);
-      doc.circle(W / 2, 16, 8, "F");
-      doc.setTextColor(61, 0, 102);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text("PH", W / 2, 18.5, { align: "center" });
+    const rows = [
+      ["Full Name", member.name],
+      ["Phone Number", member.phone],
+      ["Event", event ? event.name : payment.event_name || ""],
+      ["Amount Paid", "NGN " + (+evtPrice).toLocaleString()],
+      ["Reference No.", payment.reference || ""],
+      ["Confirmed On", payment.confirmed_at ? new Date(payment.confirmed_at).toLocaleString() : ""],
+    ];
+    let y = 80;
+    rows.forEach(([label, value], i) => {
+      if (i % 2 === 0) { doc.setFillColor(250, 248, 255); doc.rect(10, y - 5, W - 20, 10, "F"); }
+      doc.setTextColor(150, 150, 150); doc.setFontSize(7); doc.setFont("helvetica", "normal");
+      doc.text(label, 15, y);
+      doc.setTextColor(33, 33, 33); doc.setFontSize(8); doc.setFont("helvetica", "bold");
+      doc.text(doc.splitTextToSize(String(value), 80), W - 15, y, { align: "right" });
+      y += 12;
+    });
 
-      // ── App name
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text("PH CONNECTZ", W / 2, 32, { align: "center" });
-
-      // ── Receipt label
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(240, 192, 64);
-      doc.text("OFFICIAL PAYMENT RECEIPT", W / 2, 40, { align: "center" });
-
-      // ── Receipt number box
-      doc.setFillColor(248, 240, 255);
-      doc.roundedRect(10, 54, W - 20, 12, 2, 2, "F");
-      doc.setTextColor(106, 13, 173);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text("Receipt No.", 15, 61);
-      doc.setTextColor(61, 0, 102);
-      doc.setFontSize(9);
-      doc.text(payment.receipt_no || "", W - 15, 61, { align: "right" });
-
-      // ── Divider
-      doc.setDrawColor(240, 192, 64);
-      doc.setLineWidth(0.5);
-      doc.line(10, 70, W - 10, 70);
-
-      // ── Detail rows
-      const rows = [
-        ["Full Name", member.name],
-        ["Phone Number", member.phone],
-        ["Event", evtName],
-        ["Amount Paid", "NGN " + (+evtPrice).toLocaleString()],
-        ["Reference No.", payment.reference || ""],
-        ["Confirmed On", payment.confirmed_at ? new Date(payment.confirmed_at).toLocaleString() : ""],
-      ];
-
-      let y = 80;
-      rows.forEach(([label, value], i) => {
-        if (i % 2 === 0) {
-          doc.setFillColor(250, 248, 255);
-          doc.rect(10, y - 5, W - 20, 10, "F");
-        }
-        doc.setTextColor(150, 150, 150);
-        doc.setFontSize(7);
-        doc.setFont("helvetica", "normal");
-        doc.text(label, 15, y);
-        doc.setTextColor(33, 33, 33);
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "bold");
-        const lines = doc.splitTextToSize(String(value), 80);
-        doc.text(lines, W - 15, y, { align: "right" });
-        y += 12;
-      });
-
-      // ── Perk badge
-      if (payment.perk_eligible) {
-        y += 4;
-        doc.setFillColor(255, 249, 224);
-        doc.setDrawColor(240, 192, 64);
-        doc.setLineWidth(0.8);
-        doc.roundedRect(10, y, W - 20, 18, 3, 3, "FD");
-        doc.setTextColor(61, 0, 102);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        doc.text("🎁 PERK UNLOCKED!", W / 2, y + 7, { align: "center" });
-        doc.setFontSize(7);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 100, 100);
-        doc.text("You qualify for FREE 3 yards of Anniversary Fabric!", W / 2, y + 13, { align: "center" });
-        y += 26;
-      }
-
-      // ── Bottom divider
-      y += 6;
-      doc.setDrawColor(240, 192, 64);
-      doc.setLineDashPattern([2, 2], 0);
-      doc.line(10, y, W - 10, y);
-      doc.setLineDashPattern([], 0);
-
-      // ── Thank you message
-      y += 8;
-      doc.setTextColor(61, 0, 102);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text("Thank you for being part of PH Connectz!", W / 2, y, { align: "center" });
-      y += 6;
-      doc.setTextColor(130, 130, 130);
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.text("See you at the celebration!", W / 2, y, { align: "center" });
-
-      // ── Footer
-      y += 10;
-      doc.setFillColor(61, 0, 102);
-      doc.rect(0, y, W, 10, "F");
-      doc.setTextColor(240, 192, 64);
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "bold");
-      doc.text("PH CONNECTZ \u2014 Verified Payment Receipt", W / 2, y + 6, { align: "center" });
-
-      // ── Save
-      const filename = "PHConnectz_Receipt_" + member.name.replace(/ /g, "_") + ".pdf";
-      doc.save(filename);
-    } catch (e) {
-      alert("Could not generate PDF. Please try again.");
-    } finally {
-      setGenerating(false);
+    if (payment.perk_eligible) {
+      y += 4;
+      doc.setFillColor(255, 249, 224); doc.setDrawColor(240, 192, 64); doc.setLineWidth(0.8);
+      doc.roundedRect(10, y, W - 20, 18, 3, 3, "FD");
+      doc.setTextColor(61, 0, 102); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+      doc.text("PERK UNLOCKED!", W / 2, y + 7, { align: "center" });
+      doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+      doc.text("You qualify for FREE 3 yards of Anniversary Fabric!", W / 2, y + 13, { align: "center" });
+      y += 26;
     }
+
+    y += 6;
+    doc.setDrawColor(240, 192, 64); doc.setLineDashPattern([2, 2], 0);
+    doc.line(10, y, W - 10, y); doc.setLineDashPattern([], 0);
+    y += 8;
+    doc.setTextColor(61, 0, 102); doc.setFontSize(8); doc.setFont("helvetica", "bold");
+    doc.text("Thank you for being part of PH Connectz!", W / 2, y, { align: "center" });
+    y += 6;
+    doc.setTextColor(130, 130, 130); doc.setFontSize(7); doc.setFont("helvetica", "normal");
+    doc.text("See you at the celebration!", W / 2, y, { align: "center" });
+    y += 10;
+    doc.setFillColor(61, 0, 102); doc.rect(0, y, W, 10, "F");
+    doc.setTextColor(240, 192, 64); doc.setFontSize(7); doc.setFont("helvetica", "bold");
+    doc.text("PH CONNECTZ \u2014 Verified Payment Receipt", W / 2, y + 6, { align: "center" });
+    return doc;
   };
 
-  const shareWA = () => {
-    if (!payment) return;
-    const evtName = event ? event.name : "";
-    const evtPrice = event ? event.ticket_price : 20000;
+  const downloadPDF = async (payment) => {
+    setGenerating(payment.id);
+    try {
+      await loadJsPDF();
+      const evt = getEvent(payment.event_id);
+      const doc = buildPDF(payment, evt);
+      doc.save("PHConnectz_Receipt_" + member.name.replace(/ /g, "_") + ".pdf");
+    } catch { alert("Could not generate PDF. Please try again."); }
+    finally { setGenerating(null); }
+  };
+
+  const saveAsImage = async (payment) => {
+    setSavingImg(payment.id);
+    try {
+      await loadJsPDF();
+      // Also load html2canvas
+      await new Promise((resolve, reject) => {
+        if (window.html2canvas) { resolve(); return; }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+        script.onload = resolve; script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      const evt = getEvent(payment.event_id);
+      const doc = buildPDF(payment, evt);
+      // Convert PDF page to image via data URI then download
+      const imgDataUri = doc.output("datauristring");
+      // Build a canvas from first page
+      const pdfBlob = doc.output("blob");
+      // Fallback: just download PDF but named as shareable
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "PHConnectz_Receipt_" + member.name.replace(/ /g, "_") + "_share.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+      showToastLocal("Saved! Open the file and take a screenshot to share on WhatsApp 📲");
+    } catch { alert("Could not save image. Please try again."); }
+    finally { setSavingImg(null); }
+  };
+
+  const [localToast, setLocalToast] = useState(null);
+  const showToastLocal = (msg) => { setLocalToast(msg); setTimeout(() => setLocalToast(null), 5000); };
+
+  const shareWA = (payment) => {
+    const evt = getEvent(payment.event_id);
+    const evtName = evt ? evt.name : payment.event_name || "";
+    const evtPrice = evt ? evt.ticket_price : 20000;
     const msg = "👑 *PH CONNECTZ PAYMENT RECEIPT*\n\n"
       + "Receipt No: " + (payment.receipt_no || "") + "\n"
       + "Name: " + member.name + "\n"
@@ -711,62 +741,70 @@ function MemberReceipts({ member }) {
   };
 
   if (loading) return <Loader />;
-  const evtName = event ? event.name : "";
-  const evtPrice = event ? event.ticket_price : 20000;
 
   return (
     <div>
       <SecTitle>Receipt History</SecTitle>
-      {!payment ? (
+      {localToast && (
+        <div className="fu" style={{ background: C.purple, color: "#fff", borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>{localToast}</div>
+      )}
+      {payments.length === 0 ? (
         <div className="fu" style={{ background: "#fff", borderRadius: 16, padding: 24, textAlign: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.07)" }}>
           <div style={{ fontSize: 48, marginBottom: 12 }}>🧾</div>
           <p style={{ color: "#aaa", fontSize: 14, margin: 0 }}>No confirmed receipts yet.</p>
-          <p style={{ color: "#ccc", fontSize: 12, margin: "6px 0 0" }}>Your receipt will appear here once your payment is confirmed.</p>
+          <p style={{ color: "#ccc", fontSize: 12, margin: "6px 0 0" }}>Receipts appear here once your payment is confirmed.</p>
         </div>
       ) : (
-        <div>
-          {/* Receipt preview card */}
-          <div className="fu" style={{ background: "#fff", border: "3px solid " + C.gold, borderRadius: 20, overflow: "hidden", marginBottom: 14, boxShadow: "0 8px 28px rgba(240,192,64,0.2)" }}>
-            <div style={{ background: C.gMain, padding: "22px 24px", textAlign: "center" }}>
-              <div style={{ fontSize: 38 }}>👑</div>
-              <h2 style={{ color: "#fff", margin: "4px 0 2px", fontSize: 20, fontWeight: 900, letterSpacing: 1 }}>PH CONNECTZ</h2>
-              <div style={{ background: C.gold, color: C.purple, fontSize: 10, fontWeight: 800, letterSpacing: 3, padding: "3px 14px", borderRadius: 20, display: "inline-block", marginTop: 4 }}>OFFICIAL PAYMENT RECEIPT</div>
-            </div>
-            <div style={{ padding: "20px 24px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "2px dashed " + C.gold }}>
-                <span style={{ fontSize: 12, color: "#999" }}>Receipt No.</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>{payment.receipt_no}</span>
+        payments.map((payment, i) => {
+          const evt = getEvent(payment.event_id);
+          const evtPrice = evt ? evt.ticket_price : 20000;
+          return (
+            <div key={payment.id} className="fu" style={{ background: "#fff", border: "3px solid " + C.gold, borderRadius: 20, overflow: "hidden", marginBottom: 20, boxShadow: "0 8px 28px rgba(240,192,64,0.2)", animationDelay: (i * 0.08) + "s" }}>
+              <div style={{ background: C.gMain, padding: "18px 24px", textAlign: "center" }}>
+                <div style={{ fontSize: 32 }}>👑</div>
+                <h2 style={{ color: "#fff", margin: "4px 0 2px", fontSize: 18, fontWeight: 900, letterSpacing: 1 }}>PH CONNECTZ</h2>
+                <div style={{ background: C.gold, color: C.purple, fontSize: 9, fontWeight: 800, letterSpacing: 2, padding: "2px 12px", borderRadius: 20, display: "inline-block", marginTop: 4 }}>OFFICIAL PAYMENT RECEIPT</div>
               </div>
-              {[["Full Name", member.name], ["Phone", member.phone], ["Event", evtName], ["Amount Paid", "₦" + (+evtPrice).toLocaleString()], ["Reference", payment.reference], ["Confirmed On", new Date(payment.confirmed_at).toLocaleString()]].map(([k, v]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #f5f5f5" }}>
-                  <span style={{ fontSize: 12, color: "#999" }}>{k}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333", textAlign: "right", maxWidth: "60%" }}>{v}</span>
+              <div style={{ padding: "16px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, paddingBottom: 10, borderBottom: "2px dashed " + C.gold }}>
+                  <span style={{ fontSize: 12, color: "#999" }}>Receipt No.</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>{payment.receipt_no}</span>
                 </div>
-              ))}
-              {payment.perk_eligible && (
-                <div style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: "2px solid " + C.gold, borderRadius: 12, padding: 12, margin: "14px 0", textAlign: "center" }}>
-                  <div style={{ fontSize: 24, animation: "pulse 2s infinite" }}>🎁</div>
-                  <p style={{ margin: "4px 0 0", color: C.purple, fontWeight: 800, fontSize: 13 }}>You qualify for FREE 3 yards of Anniversary Fabric!</p>
+                {[["Full Name", member.name], ["Phone", member.phone], ["Event", evt ? evt.name : payment.event_name], ["Amount Paid", "₦" + (+evtPrice).toLocaleString()], ["Reference", payment.reference], ["Confirmed On", new Date(payment.confirmed_at).toLocaleString()]].map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
+                    <span style={{ fontSize: 12, color: "#999" }}>{k}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#333", textAlign: "right", maxWidth: "60%" }}>{v}</span>
+                  </div>
+                ))}
+                {payment.perk_eligible && (
+                  <div style={{ background: "linear-gradient(135deg,#fff9e0,#fff3b0)", border: "2px solid " + C.gold, borderRadius: 10, padding: 10, margin: "12px 0", textAlign: "center" }}>
+                    <div style={{ fontSize: 22, animation: "pulse 2s infinite" }}>🎁</div>
+                    <p style={{ margin: "4px 0 0", color: C.purple, fontWeight: 800, fontSize: 13 }}>You qualify for FREE 3 yards of Anniversary Fabric!</p>
+                  </div>
+                )}
+                <div style={{ textAlign: "center", marginTop: 14, paddingTop: 10, borderTop: "2px dashed " + C.gold }}>
+                  <p style={{ fontSize: 12, color: C.purple, fontWeight: 700, margin: 0 }}>Thank you for being part of PH Connectz!</p>
+                  <p style={{ fontSize: 11, color: "#888", margin: "3px 0 0" }}>See you at the celebration! 🎉</p>
                 </div>
-              )}
-              <div style={{ textAlign: "center", marginTop: 16, paddingTop: 12, borderTop: "2px dashed " + C.gold }}>
-                <p style={{ fontSize: 12, color: C.purple, fontWeight: 700, margin: 0 }}>Thank you for being part of PH Connectz!</p>
-                <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>See you at the celebration! 🎉</p>
+              </div>
+              {/* Action buttons */}
+              <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <GBtn onClick={() => downloadPDF(payment)} loading={generating === payment.id} style={{ flex: 1, fontSize: 13 }}>
+                    ⬇ Download PDF
+                  </GBtn>
+                  <GBtn onClick={() => shareWA(payment)} style={{ flex: 1, fontSize: 13, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
+                    📲 WhatsApp Text
+                  </GBtn>
+                </div>
+                <GBtn onClick={() => saveAsImage(payment)} loading={savingImg === payment.id} style={{ width: "100%", fontSize: 13, background: "linear-gradient(135deg," + C.mid + "," + C.purple + ")" }}>
+                  🖼 Save as PDF to Share on WhatsApp
+                </GBtn>
+                <p style={{ fontSize: 11, color: "#aaa", textAlign: "center", margin: 0 }}>Download PDF → open it → screenshot → share on WhatsApp</p>
               </div>
             </div>
-          </div>
-
-          {/* Action buttons */}
-          <div style={{ display: "flex", gap: 10 }}>
-            <GBtn onClick={generatePDF} loading={generating} style={{ flex: 1, background: C.gMain }}>
-              {generating ? "Generating…" : "⬇ Download PDF"}
-            </GBtn>
-            <GBtn onClick={shareWA} style={{ flex: 1, background: "linear-gradient(135deg,#25D366,#128C7E)" }}>
-              📲 WhatsApp
-            </GBtn>
-          </div>
-          <p style={{ fontSize: 11, color: "#aaa", textAlign: "center", marginTop: 8 }}>PDF includes all receipt details and is formatted for printing.</p>
-        </div>
+          );
+        })
       )}
     </div>
   );
@@ -1300,7 +1338,12 @@ function AdminPayments({ showToast }) {
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const reject = async id => { try { await api("payments?id=eq." + id, { method: "PATCH", body: JSON.stringify({ status: "Rejected" }) }); load(); showToast("Payment rejected", "error"); } catch (e) { showToast(e.message, "error"); } };
+  const reject = async id => {
+    try {
+      await api("payments?id=eq." + id, { method: "PATCH", body: JSON.stringify({ status: "Rejected", receipt_image: null }) });
+      load(); showToast("Payment rejected", "error");
+    } catch (e) { showToast(e.message, "error"); }
+  };
 
   const confirmed = payments.filter(p => p.status === "Confirmed");
   const pending = payments.filter(p => p.status === "Pending");
